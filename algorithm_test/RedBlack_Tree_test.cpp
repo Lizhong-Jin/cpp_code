@@ -171,6 +171,7 @@ public:
         if (n==0) return;
         // 若只有一个节点，直接删除
         if (n==1) {
+            if(root->val != val) return;
             n--;
             delete root;
             root = nil;

@@ -1,0 +1,15 @@
+cmake_minimum_required(VERSION 3.16)
+project(thread_pool_tests LANGUAGES CXX)
+
+find_package(Threads REQUIRED)
+add_executable(thread_pool_tests Thread_Pool_test.cpp Thread_Pool_benchmark.cpp)
+target_compile_features(thread_pool_tests PRIVATE cxx_std_17)
+set_target_properties(thread_pool_tests PROPERTIES CXX_EXTENSIONS OFF)
+target_link_libraries(thread_pool_tests PRIVATE Threads::Threads)
+if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
+    target_compile_options(thread_pool_tests PRIVATE -Wall -Wextra -Wpedantic)
+endif()
+
+enable_testing()
+add_test(NAME thread_pool_tests COMMAND thread_pool_tests)
+set_tests_properties(thread_pool_tests PROPERTIES TIMEOUT 240)
