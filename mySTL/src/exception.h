@@ -10,7 +10,7 @@ namespace mystl {
         constexpr exception(const exception& other) noexcept;
         constexpr exception& operator=(const exception& other) noexcept = default;
         virtual ~exception() noexcept;
-        [[nodiscard]] virtual constexpr const char* what() const noexcept {
+        [[nodiscard]] virtual const char* what() const noexcept {
             return "mystl::exception";
         }
     };

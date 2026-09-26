@@ -9,7 +9,6 @@
 
 #include "construct.h"
 #include "functions.h"
-#include "wrappers.h"
 #include "../exception.h"
 #include "../cstring.h"
 #include "../utility.h"
@@ -20,7 +19,7 @@ namespace mystl {
     // bad_function_call
     class bad_function_call final : public exception {
     public:
-        [[nodiscard]] constexpr const char* what() const noexcept override {return "bad function call";}
+        [[nodiscard]] const char* what() const noexcept override {return "bad function call";}
     };
 
     // is_bind_expression

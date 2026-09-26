@@ -3,6 +3,8 @@
 #ifndef BITSET_H
 #define BITSET_H
 
+#include <cstddef>
+
 namespace mystl {
     template <size_t N>
     class bitset {

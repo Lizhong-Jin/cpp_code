@@ -3,7 +3,6 @@
 #ifndef ITERATOR_H
 #define ITERATOR_H
 
-#include "iterator.h"
 #include "utility.h"
 
 namespace mystl {
@@ -32,7 +31,7 @@ namespace mystl {
     template <typename T, typename = void>
     struct has_iterator_cat : false_type {};
     template <typename T>
-    struct has_iterator_cat<T, void_t<typename remove_cv_ref<T>::iterator_category>> : true_type {};
+    struct has_iterator_cat<T, void_t<typename remove_cv_ref_t<T>::iterator_category>> : true_type {};
     template <typename T>
     static constexpr bool has_iterator_cat_v = has_iterator_cat<T>::value;
 
@@ -41,11 +40,13 @@ namespace mystl {
     struct iterator_traits_base {};
     template <typename T>
     struct iterator_traits_base<T, true> {
-        using iterator_category = remove_cv_ref<T>::iterator_category;
-        using value_type = remove_cv_ref<T>::value_type;
-        using difference_type = remove_cv_ref<T>::difference_type;
-        using pointer = remove_cv_ref<T>::pointer;
-        using reference = remove_cv_ref<T>::reference;
+        using U = remove_cv_ref_t<T>;
+
+        using iterator_category = typename U::iterator_category;
+        using value_type        = typename U::value_type;
+        using difference_type   = typename U::difference_type;
+        using pointer           = typename U::pointer;
+        using reference         = typename U::reference;
     };
 
     // iterator_traits
@@ -53,25 +54,16 @@ namespace mystl {
     struct iterator_traits : iterator_traits_base<T> {};
 
     // native pointer specialization
-    template <typename T, bool = is_cv_void_v<T>>
-    struct iterator_traits_ptr_helper {};
     template <typename T>
-    struct iterator_traits_ptr_helper<T, false> {
-        using iterator_category = contiguous_iterator_tag;
-        using value_type = remove_cv_t<T>;
-        using difference_type = ptrdiff_t;
-        using pointer = T*;
-        using reference = T&;
-    };
+    struct iterator_traits<T*> {
+        static_assert(is_object_v<T>, "iterator_traits<T*> requires T to be an object type");
 
-    template <typename T>
-    struct iterator_traits<T*> : iterator_traits_ptr_helper<T> {};
-    template <typename T>
-    struct iterator_traits<const T*> : iterator_traits_ptr_helper<T> {};
-    template <typename T>
-    struct iterator_traits<volatile T*> : iterator_traits_ptr_helper<T> {};
-    template <typename T>
-    struct iterator_traits<const volatile T*> : iterator_traits_ptr_helper<T> {};
+        using iterator_category = contiguous_iterator_tag;
+        using value_type        = remove_cv_t<T>;
+        using difference_type   = std::ptrdiff_t;
+        using pointer           = T*;
+        using reference         = T&;
+    };
 
     template <typename Iterator> using iter_category        = iterator_traits<Iterator>::iterator_category;
     template <typename Iterator> using iter_value_type      = iterator_traits<Iterator>::value_type;

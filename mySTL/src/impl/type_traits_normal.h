@@ -3,6 +3,8 @@
 #ifndef TYPE_TRAITS_NORMAL_H
 #define TYPE_TRAITS_NORMAL_H
 
+#include <cstddef>
+
 namespace mystl {
 
 #ifndef __has_builtin
@@ -16,6 +18,12 @@ namespace mystl {
     template <class T, T v>
     struct integral_constant {
         static constexpr T value = v;
+        
+        using value_type = T;
+        using type = integral_constant;
+
+        constexpr operator value_type() const noexcept {return value;}
+        constexpr value_type operator()() const noexcept {return value;}
     };
     template <bool b>
     using bool_constant = integral_constant<bool, b>;
@@ -81,7 +89,7 @@ namespace mystl {
 
     // remove_cv_ref : remove cv and reference
     template <typename T>
-    struct remove_cv_ref {using type = remove_reference<typename remove_cv<T>::type>;};
+    struct remove_cv_ref {using type = remove_cv_t<remove_reference_t<T>>;};
     template <typename T>
     using remove_cv_ref_t = typename remove_cv_ref<T>::type;
 
@@ -98,9 +106,9 @@ namespace mystl {
     // remove_pointer
     template <typename T> struct remove_pointer {using type = T;};
     template <typename T> struct remove_pointer<T*> {using type = T;};
-    template <typename T> struct remove_pointer<const T*> {using type = T;};
-    template <typename T> struct remove_pointer<volatile T*> {using type = T;};
-    template <typename T> struct remove_pointer<const volatile T*> {using type = T;};
+    template <typename T> struct remove_pointer<T* const> {using type = T;};
+    template <typename T> struct remove_pointer<T* volatile> {using type = T;};
+    template <typename T> struct remove_pointer<T* const volatile> {using type = T;};
     template <typename T> using remove_pointer_t = typename remove_pointer<T>::type;
 
     // add_pointer
@@ -133,7 +141,7 @@ namespace mystl {
                         _is_complete_or_unbounded(Type_Identity) {return {};}
 
     template <typename T>
-    inline constexpr bool _is_complete_or_unbounded_v = _is_complete_or_unbounded(type_identity<T>{});
+    inline constexpr bool _is_complete_or_unbounded_v = decltype(_is_complete_or_unbounded(type_identity<T>{}))::value;
 
     // ***************************************************************************************************
     // ************************* primary type categories *************************************************

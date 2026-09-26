@@ -3,15 +3,19 @@
 #ifndef CONSTRUCT_H
 #define CONSTRUCT_H
 
+#include <cstdint>
+#include <new>
+
 #include "../type_traits.h"
 #include "../iterator.h"
+#include "../utility.h"
 
 namespace mystl {
     // addressof
     template <typename T>
     constexpr enable_if_t<is_object_v<T>, T*> addressof(T& arg) noexcept {
 #if __has_builtin(__builtin_addressof)
-        return _builtin_addressof(arg);
+        return __builtin_addressof(arg);
 #else
         return reinterpret_cast<T*>(&const_cast<char&>(reinterpret_cast<const volatile char&>(arg)));
 #endif
