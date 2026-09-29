@@ -78,14 +78,10 @@ namespace mystl {
             return *this;
         }
 
-        constexpr function& operator=(const function& other) noexcept {
+        constexpr function& operator=(const function& other) {
             if (this == &other) return *this;
-            if (v_ptr) v_ptr->destroy(ptr, on_heap);
-            reset_to_empty();
-            if (other.v_ptr) {
-                ptr = other.v_ptr->clone(other.ptr, buffer, on_heap);
-                v_ptr = other.v_ptr;
-            }
+            function temp(other);
+            swap(temp);
             return *this;
         }
 
@@ -103,6 +99,7 @@ namespace mystl {
                     ptr = other.v_ptr->move(other.ptr, buffer, on_heap);
                     v_ptr = other.v_ptr;
                     on_heap = false;
+                    other.reset_to_empty();
                 }
             }
             return *this;
@@ -111,9 +108,8 @@ namespace mystl {
         template <typename F>
         requires (!is_same_v<decay_t<F>, function>)
         constexpr function& operator=(F&& f) {
-            if (v_ptr) v_ptr->destroy(ptr, on_heap);
-            reset_to_empty();
-            emplace_functor(forward<F>(f));
+            function temp(mystl::forward<F>(f));
+            swap(temp);
             return *this;
         }
 
@@ -127,26 +123,10 @@ namespace mystl {
 
         // swap
         constexpr void swap(function& other) noexcept {
-            using mystl::swap;
-            if (!v_ptr && !other.v_ptr) return;
-            if (!v_ptr) {*this = move(other); return;}
-            if (!other.v_ptr) {other = move(*this); return;}
-            if (on_heap && other.on_heap) {
-                swap(ptr, other.ptr);
-                swap(v_ptr, other.v_ptr);
-            }else if (!on_heap && !other.on_heap) {
-                alignas(buffer_align) std::byte temp[buffer_size];
-                memcpy(temp, buffer, buffer_size);
-                memcpy(buffer, other.buffer, buffer_size);
-                memcpy(other.buffer, temp, buffer_size);
-                swap(ptr, other.ptr);
-                swap(v_ptr, other.v_ptr);
-            }else {
-                auto temp = move(other);
-                other = move(*this);
-                *this = move(temp);
-                swap(on_heap, other.on_heap);
-            }
+            if (this == &other) return;
+            function temp(mystl::move(other));
+            other = mystl::move(*this);
+            *this = mystl::move(temp);
         }
 
         // operator ==
@@ -174,8 +154,8 @@ namespace mystl {
         template <typename T>
         constexpr T* target() noexcept {
             if (!v_ptr) return nullptr;
-            if (v_ptr == get_vtable<T>()) {
-                return reinterpret_cast<T*>(v_ptr->raw_ptr());
+            if (target_type() == typeid(T)) {
+                return static_cast<T*>(v_ptr->raw_ptr(ptr));
             }
             return nullptr;
         }
@@ -183,8 +163,8 @@ namespace mystl {
         template <typename T>
         constexpr const T* target() const noexcept {
             if (!v_ptr) return nullptr;
-            if (v_ptr == get_vtable<T>()) {
-                return reinterpret_cast<const T*>(v_ptr->raw_ptr());
+            if (target_type() == typeid(T)) {
+                return static_cast<const T*>(v_ptr->raw_ptr(ptr));
             }
             return nullptr;
         }
@@ -192,7 +172,7 @@ namespace mystl {
     private:
         // virtual table
         struct vtable_t {
-            R                       (*invoke)(void*, Args&&...) noexcept;
+            R                       (*invoke)(void*, Args&&...);
             void                    (*destroy)(void*, bool on_heap) noexcept;
             void*                   (*clone)(const void* src, void* dest, bool& dest_on_heap);
             void*                   (*move)(void* src, void* dest, bool& dest_on_heap) noexcept;
@@ -227,9 +207,9 @@ namespace mystl {
         static constexpr R invoke_impl(void* self, Args&&... args)
         noexcept(is_nothrow_invocable_r_v<R, F&, Args...>) {
             if constexpr (is_void_v<R>) {
-                invoke(*reinterpret_cast<F*>(self), forward<Args>(args)...);
+                mystl::invoke(*reinterpret_cast<F*>(self), mystl::forward<Args>(args)...);
             }else {
-                return invoke(*reinterpret_cast<F*>(self), forward<Args>(args)...);;
+                return mystl::invoke(*reinterpret_cast<F*>(self), mystl::forward<Args>(args)...);
             }
         }
 
@@ -259,9 +239,9 @@ namespace mystl {
 
         template <typename F>
         static constexpr void* move_impl(void* src, void* dest, bool& dest_on_heap) noexcept {
-            auto s = reinterpret_cast<const F*>(src);
+            auto s = reinterpret_cast<F*>(src);
             if constexpr (is_small<F>()) {
-                new (dest) F(move(*s));
+                new (dest) F(mystl::move(*s));
                 s->~F();
                 dest_on_heap = false;
                 return as_local<F>(dest);
@@ -307,14 +287,18 @@ namespace mystl {
         template <typename F>
         constexpr void emplace_functor(F&& f) {
             using functor_t = decay_t<F>;
-            static_assert(is_invocable_r_v<R, functor_t, Args...>,
+            static_assert(is_invocable_r_v<R, functor_t&, Args...>,
                             "Function target must be callable with the signature R(Args...)");
+            static_assert(is_copy_constructible_v<functor_t>, "Function target must be copy constructible");
+            if constexpr (is_pointer_v<functor_t> || is_member_pointer_v<functor_t>) {
+                if (f == nullptr) return;
+            }
             if constexpr (is_small<functor_t>()) {
                 new (buffer) functor_t(forward<F>(f));
                 ptr = as_local<functor_t>(buffer);
                 on_heap = false;
             }else {
-                new (buffer) functor_t(forward<F>(f));
+                ptr = new functor_t(mystl::forward<F>(f));
                 on_heap = true;
             }
             v_ptr = get_vtable<functor_t>();

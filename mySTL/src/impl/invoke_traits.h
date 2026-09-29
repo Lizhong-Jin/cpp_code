@@ -27,7 +27,7 @@ namespace mystl {
     private:
         template <typename Fp, typename Tp, typename... A>
         static constexpr _result_of_success<
-            decltype((declval<Tp&>().*declval<Fp>())(declval<A>()...)), _invoke_member_function_ref> test(int);
+            decltype((declval<Tp>().*declval<Fp>())(declval<A>()...)), _invoke_member_function_ref> test(int);
         template <typename...>
         static constexpr _failure_type test(...);
     public:
@@ -53,9 +53,9 @@ namespace mystl {
     struct _result_of_member_function<R Class::*, Arg, Args...> {
         using Argval = remove_reference_t<Arg>;
         using MemberPtr = R Class::*;
-        using type = conditional_t<is_base_of_v<Class, Argval>,
+        using type = typename conditional_t<is_base_of_v<Class, Argval>,
                     _result_of_member_function_ref<MemberPtr, Arg, Args...>,
-                    _result_of_member_function_deref<MemberPtr, Arg, Args...>>;
+                    _result_of_member_function_deref<MemberPtr, Arg, Args...>>::type;
     };
 
     template <typename MemberPtr, typename Arg>
@@ -89,9 +89,9 @@ namespace mystl {
     struct _result_of_member_object<R Class::*, Arg> {
         using Argval = remove_reference_t<Arg>;
         using MemberPtr = R Class::*;
-        using type = conditional_t<is_same_v<Argval, Class> || is_base_of_v<Class, Argval>,
+        using type = typename conditional_t<is_same_v<Argval, Class> || is_base_of_v<Class, Argval>,
                     _result_of_member_object_ref<MemberPtr, Arg>,
-                    _result_of_member_object_deref<MemberPtr, Arg>>;
+                    _result_of_member_object_deref<MemberPtr, Arg>>::type;
     };
 
     // result of other
@@ -99,7 +99,7 @@ namespace mystl {
     struct _result_of_other {
     private:
         template <typename F, typename... A>
-        static constexpr _result_of_success<decltype(declval<F&>()(declval<A>()...)), _invoke_other> test(int);
+        static constexpr _result_of_success<decltype(declval<F>()(declval<A>()...)), _invoke_other> test(int);
         template <typename...>
         static constexpr _failure_type test(...);
     public:
@@ -147,7 +147,9 @@ namespace mystl {
     struct is_invocable_impl : false_type {};
 
     template <typename Result, typename Ret>
-    struct is_invocable_impl<Result, Ret, true, void_t<typename Result::type>> : true_type {};
+    struct is_invocable_impl<Result, Ret, true, void_t<typename Result::type>> : true_type {
+        using nothrow_type = true_type;
+    };
 
     template <typename Result, typename Ret>
     struct is_invocable_impl<Result, Ret, false, void_t<typename Result::type>> {
@@ -159,7 +161,7 @@ namespace mystl {
 
         template <typename T, bool Nothrow = noexcept(conv<T>(get())),
                     typename = decltype(conv<T>(get())),
-#if defined(__clang__) || defined(__GNUC__) || defined(_MSC_VER) || __has_builtin(__reference_converts_from_temporary)
+#if __has_builtin(__reference_converts_from_temporary)
                     bool Dangle = __reference_converts_from_temporary(T, Result_type)
 #else
                     bool Dangle = false
@@ -170,12 +172,13 @@ namespace mystl {
         template <typename T, bool = false> static false_type test(...);
     public:
         using type = decltype(test<Ret, true>(0));
+        using nothrow_type = decltype(test<Ret>(0));
     };
 
     template <typename Fn, typename Tp, typename... Args>
     constexpr bool _call_is_nothrow_impl(_invoke_member_function_ref) {
         using Up = unwrap_reference_t<Tp>;
-        return noexcept((declval<Up&>().*declval<Fn>())(declval<Args>()...));
+        return noexcept((declval<Up>().*declval<Fn>())(declval<Args>()...));
     }
     template <typename Fn, typename Tp, typename... Args>
     constexpr bool _call_is_nothrow_impl(_invoke_member_function_deref) {
@@ -192,14 +195,24 @@ namespace mystl {
     }
     template <typename Fn, typename... Args>
     constexpr bool _call_is_nothrow_impl(_invoke_other) {
-        return noexcept(declval<Fn&>()(declval<Args>()...));
+        return noexcept(declval<Fn>()(declval<Args>()...));
     }
 
     template <typename Result, typename Fn, typename... Args>
-    struct _call_is_nothrow_total_impl : bool_constant<_call_is_nothrow_impl<Fn, Args...>(Result::invoke_type)> {};
+    struct _call_is_nothrow_total_impl : bool_constant<_call_is_nothrow_impl<Fn, Args...>(typename Result::invoke_type{})> {};
 
     template <typename Fn, typename... Args>
     struct _call_is_nothrow : _call_is_nothrow_total_impl<invoke_result<Fn, Args...>, Fn, Args...> {};
+
+    // Only inspect the call expression after invocation and result conversion are valid.
+    template <typename Ret, typename Fn, typename Enable, typename... Args>
+    struct _nothrow_invocable_result : false_type {};
+
+    template <typename Ret, typename Fn, typename... Args>
+    struct _nothrow_invocable_result<Ret, Fn,
+        enable_if_t<is_invocable_impl<invoke_result<Fn, Args...>, Ret>::type::value>, Args...>
+        : bool_constant<_call_is_nothrow<Fn, Args...>::value &&
+            is_invocable_impl<invoke_result<Fn, Args...>, Ret>::nothrow_type::value> {};
 
     // is_invocable
     template <typename Functor, typename... Args>
@@ -245,8 +258,7 @@ namespace mystl {
 #if __has_builtin(__is_nothrow_invocable)
         : bool_constant<__is_nothrow_invocable(Functor, Args...)>
 #else
-        : bool_constant<is_invocable_impl<invoke_result<Functor, Args...>, void>::type::value
-                        && _call_is_nothrow<Functor, Args...>::value>
+        : _nothrow_invocable_result<void, Functor, void, Args...>
 #endif
     {
         static_assert(_is_complete_or_unbounded_v<Functor>,
@@ -264,8 +276,7 @@ namespace mystl {
 #if __has_builtin(__is_nothrow_invocable_r)
         : bool_constant<__is_nothrow_invocable_r(Ret, Functor, Args...)>
 #else
-        : bool_constant<is_invocable_impl<invoke_result<Functor, Args...>, Ret>::type::value
-                        && _call_is_nothrow<Functor, Args...>::value>
+        : _nothrow_invocable_result<Ret, Functor, void, Args...>
 #endif
     {
         static_assert(_is_complete_or_unbounded_v<Functor>,

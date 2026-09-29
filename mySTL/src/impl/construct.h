@@ -51,16 +51,19 @@ namespace mystl {
 
     template <typename T, typename... Args>
     void construct(T* ptr, Args&&... args) {
-        ::new (static_cast<void *>(ptr)) T(forward<Args>(args)...);
+        ::new (static_cast<void *>(ptr)) T(mystl::forward<Args>(args)...);
     }
 
     // destroy_at
+    template <typename T>
+    void destroy_at(T* ptr) noexcept;
+
     template <typename T>
     void destroy_at_impl(T* ptr) noexcept {
         if constexpr (is_bounded_array_v<T>) {
             using Element = remove_extent_t<T>;
             for (size_t i = 0; i < extent_v<T>; ++i) {
-                destroy_at(addressof((*ptr)[i]));
+                mystl::destroy_at(mystl::addressof((*ptr)[i]));
             }
         }else {
             ptr->~T();
@@ -78,7 +81,7 @@ namespace mystl {
     template <typename Forward_Iterator>
     void destroy(Forward_Iterator first, Forward_Iterator last) noexcept {
         if constexpr (!is_trivially_destructible_v<iter_value_type<Forward_Iterator>>) {
-            for (; first != last; ++first) destroy_at(addressof(*first));
+            for (; first != last; ++first) mystl::destroy_at(mystl::addressof(*first));
         }
     }
 
@@ -86,13 +89,13 @@ namespace mystl {
     template <typename Forward_Iterator, typename Size>
     Forward_Iterator destroy_n_cat(Forward_Iterator first, Size n, true_type) noexcept {
         // for trivially destructible type, do nothing
-        advance(first, n);
+        mystl::advance(first, n);
         return first;
     }
 
     template <typename Forward_Iterator, typename Size>
     Forward_Iterator destroy_n_cat(Forward_Iterator first, Size n, false_type) noexcept {
-        for (; n>0; --n, ++first) destroy_at(addressof(*first));
+        for (; n>0; --n, ++first) mystl::destroy_at(mystl::addressof(*first));
         return first;
     }
 

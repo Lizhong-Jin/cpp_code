@@ -33,18 +33,21 @@ namespace mystl {
 
     // detect Deleter::pointer
     // has_pointer_typedef
+    template <typename Deleter, typename = void>
+    struct has_pointer_typedef : false_type {};
+
     template <typename Deleter>
-    struct has_pointer_typedef {
-    private:
-        typedef char yes_type;
-        struct no_type {char dummy[2];};
-        template <typename U>
-        static yes_type test(typename Deleter::pointer*);
-        template <typename U>
-        static no_type test(...);
-    public:
-        static constexpr bool value = sizeof(test<Deleter>(nullptr)) == sizeof(yes_type);
-    };
+    struct has_pointer_typedef<Deleter, void_t<typename remove_reference_t<Deleter>::pointer>> : true_type {};
+
+    namespace detail {
+        template <typename T, typename Deleter, bool = has_pointer_typedef<Deleter>::value>
+        struct unique_ptr_pointer { using type = T*; };
+
+        template <typename T, typename Deleter>
+        struct unique_ptr_pointer<T, Deleter, true> {
+            using type = typename remove_reference_t<Deleter>::pointer;
+        };
+    }
 
     template <typename Deleter> static constexpr bool has_pointer_typedef_v = has_pointer_typedef<Deleter>::value;
 
@@ -78,7 +81,7 @@ namespace mystl {
     public:
         using element_type = T;
         using deleter_type = Deleter;
-        using pointer = conditional_t<has_pointer_typedef_v<Deleter>, typename Deleter::pointer, T*>;
+        using pointer = typename detail::unique_ptr_pointer<T, Deleter>::type;
 
         // construct
         constexpr unique_ptr() noexcept : _ptr_(pointer()), _del_() {}
@@ -98,7 +101,7 @@ namespace mystl {
             if (this != &other) {
                 reset();
                 _ptr_ = other._ptr_;
-                _del_ = mystl::move(other.get_deleter());
+                get_deleter() = mystl::move(other.get_deleter());
                 other._ptr_ = pointer();
             }
             return *this;
@@ -148,7 +151,7 @@ namespace mystl {
     public:
         using element_type = T;
         using deleter_type = Deleter;
-        using pointer = conditional_t<has_pointer_typedef_v<Deleter>, typename Deleter::pointer, T*>;
+        using pointer = typename detail::unique_ptr_pointer<T, Deleter>::type;
 
         // construct
         constexpr unique_ptr() noexcept : _ptr_(pointer()), _del_() {}
@@ -168,7 +171,7 @@ namespace mystl {
             if (this != &other) {
                 reset();
                 _ptr_ = other._ptr_;
-                _del_ = mystl::move(other.get_deleter());
+                get_deleter() = mystl::move(other.get_deleter());
                 other._ptr_ = pointer();
             }
             return *this;

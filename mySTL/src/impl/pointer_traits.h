@@ -4,6 +4,7 @@
 #define POINTER_TRAITS_H
 
 #include "../type_traits.h"
+#include "construct.h"
 
 namespace mystl {
     template <typename Ptr>

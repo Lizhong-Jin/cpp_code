@@ -6,10 +6,10 @@
 namespace mystl {
     class exception {
     public:
-        constexpr exception() noexcept;
-        constexpr exception(const exception& other) noexcept;
+        constexpr exception() noexcept = default;
+        constexpr exception(const exception& other) noexcept = default;
         constexpr exception& operator=(const exception& other) noexcept = default;
-        virtual ~exception() noexcept;
+        virtual constexpr ~exception() noexcept = default;
         [[nodiscard]] virtual const char* what() const noexcept {
             return "mystl::exception";
         }

@@ -129,6 +129,8 @@ namespace mystl {
     // _is_complete_or_unbounded
     template <typename> struct is_object;
     template <typename> struct is_unbounded_array;
+    template <typename> struct is_void;
+    template <typename> struct is_function;
 
     template <typename T> struct _maybe_complete_object_type
                                 : bool_constant<is_object<T>::value && !is_unbounded_array<T>::value> {};
@@ -137,7 +139,8 @@ namespace mystl {
     constexpr true_type _is_complete_or_unbounded(type_identity<T>) {return {};}
 
     template <typename Type_Identity, typename Nested_Type = typename Type_Identity::type>
-    constexpr bool_constant<is_unbounded_array<Nested_Type>::value>
+    constexpr bool_constant<is_unbounded_array<Nested_Type>::value || is_reference_v<Nested_Type>
+                            || is_void<Nested_Type>::value || is_function<Nested_Type>::value>
                         _is_complete_or_unbounded(Type_Identity) {return {};}
 
     template <typename T>

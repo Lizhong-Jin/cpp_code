@@ -52,7 +52,7 @@ namespace mystl {
 
     // invoke_r
     template <typename R, typename Functor, typename... Args>
-    constexpr enable_if_t<is_invocable_r_v<Functor, Args...>, R> invoke_r(Functor&& fn, Args&&... args)
+    constexpr enable_if_t<is_invocable_r_v<R, Functor, Args...>, R> invoke_r(Functor&& fn, Args&&... args)
     noexcept(is_nothrow_invocable_r_v<R, Functor, Args...>) {
         using Result = invoke_result<Functor, Args...>;
         using Result_type = typename Result::type;

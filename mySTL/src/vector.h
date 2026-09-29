@@ -373,7 +373,7 @@ namespace mystl {
 
         // size, return the number of element in vector
         [[nodiscard]] constexpr size_type size() const noexcept {
-            if (this -> M_impl._start) {
+            if (this -> M_impl._begin) {
                 const ptrdiff_t n = this->M_impl._end - this->M_impl._begin;
                 return static_cast<size_type>(n);
             }
@@ -387,7 +387,7 @@ namespace mystl {
 
         // capacity
         [[nodiscard]] constexpr size_type capacity() const noexcept {
-            if (this -> M_impl._start) {
+            if (this -> M_impl._begin) {
                 const ptrdiff_t n = this->M_impl._end_of_storage - this->M_impl._begin;
                 return static_cast<size_type>(n);
             }
@@ -433,8 +433,9 @@ namespace mystl {
             pointer new_begin = allocate_and_copy(new_cap, this -> M_impl._begin, this -> M_impl._end);
             pointer new_end = new_begin + size();
             pointer new_end_of_storage = new_begin + new_cap;
-
-            M_deallocate(this -> M_impl._begin, size());
+            
+            const auto old_cap = static_cast<size_type>(this->M_impl._end_of_storage - this->M_impl._begin);
+            M_deallocate(this -> M_impl._begin, old_cap);
 
             this -> M_impl._begin = new_begin;
             this -> M_impl._end = new_end;

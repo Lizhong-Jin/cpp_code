@@ -6,6 +6,7 @@
 #include "../iterator.h"
 #include "../utility.h"
 #include "../functional.h"
+#include "algobase.h"
 #include "heap_algo.h"
 #include "temporary_buffer.h"
 

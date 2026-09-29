@@ -55,9 +55,8 @@ namespace mystl {
 
     // native pointer specialization
     template <typename T>
+        requires is_object_v<T>
     struct iterator_traits<T*> {
-        static_assert(is_object_v<T>, "iterator_traits<T*> requires T to be an object type");
-
         using iterator_category = contiguous_iterator_tag;
         using value_type        = remove_cv_t<T>;
         using difference_type   = std::ptrdiff_t;

@@ -1,7 +1,19 @@
 cmake_minimum_required(VERSION 3.31)
 project(mySTL)
 
+# Some CMake versions do not yet map AppleClang's C++26 mode to -std=c++2c.
+if(CMAKE_CXX_COMPILER_ID STREQUAL "AppleClang" AND NOT CMAKE_CXX26_STANDARD_COMPILE_OPTION)
+    include(CheckCXXCompilerFlag)
+    check_cxx_compiler_flag("-std=c++2c" MYSTL_HAS_CXX2C)
+    if(MYSTL_HAS_CXX2C)
+        set(CMAKE_CXX26_STANDARD_COMPILE_OPTION "-std=c++2c")
+        set(CMAKE_CXX26_EXTENSION_COMPILE_OPTION "-std=gnu++2c")
+    endif()
+endif()
+
 set(CMAKE_CXX_STANDARD 26)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
 
 add_executable(mySTL main.cpp
         src/impl/type_traits_normal.h
@@ -34,3 +46,34 @@ add_executable(mySTL main.cpp
         src/vector.h
         src/initializer_list.h
         src/impl/pointer_traits.h)
+
+include(CTest)
+if(BUILD_TESTING)
+    add_executable(mystl_regression test/regression_test.cpp)
+    add_test(NAME mystl_regression COMMAND mystl_regression)
+
+    add_executable(mystl_algorithm_regression test/algorithm_regression.cpp)
+    add_test(NAME mystl_algorithm_regression COMMAND mystl_algorithm_regression)
+
+    # Compile each header in a separate translation unit so include order cannot hide dependencies.
+    # vector remains under development and is intentionally excluded from this check.
+    file(GLOB_RECURSE MYSTL_HEADERS CONFIGURE_DEPENDS RELATIVE "${CMAKE_CURRENT_SOURCE_DIR}" "src/*.h")
+    list(REMOVE_ITEM MYSTL_HEADERS "src/vector.h")
+    set(MYSTL_HEADER_CHECK_SOURCES)
+    foreach(header IN LISTS MYSTL_HEADERS)
+        string(MAKE_C_IDENTIFIER "${header}" header_id)
+        set(check_source "${CMAKE_CURRENT_BINARY_DIR}/header_checks/${header_id}.cpp")
+        file(GENERATE OUTPUT "${check_source}" CONTENT "#include \"${header}\"\n")
+        list(APPEND MYSTL_HEADER_CHECK_SOURCES "${check_source}")
+    endforeach()
+    add_library(mystl_header_checks OBJECT ${MYSTL_HEADER_CHECK_SOURCES})
+    target_include_directories(mystl_header_checks PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
+
+    option(MYSTL_ENABLE_SANITIZERS "Enable address and undefined behavior sanitizers for tests" OFF)
+    if(MYSTL_ENABLE_SANITIZERS AND CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
+        foreach(target mystl_regression mystl_algorithm_regression)
+            target_compile_options(${target} PRIVATE -fsanitize=address,undefined -fno-omit-frame-pointer)
+            target_link_options(${target} PRIVATE -fsanitize=address,undefined)
+        endforeach()
+    endif()
+endif()

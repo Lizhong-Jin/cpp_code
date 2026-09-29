@@ -46,6 +46,7 @@ build.ninja
 /test/assist
 /test/test
 /txt_read/test
+/mySTL/README.md
 
 # Generated images
 /simple graphic/Image_save/

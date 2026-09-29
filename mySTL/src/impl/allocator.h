@@ -29,34 +29,41 @@ namespace mystl {
             typedef allocator<U> other;
         };
 
-        static constexpr T* allocate() {return static_cast<T*>(::operator new(sizeof(T)));}
+        static constexpr T* allocate() {return allocate(1);}
 
         static constexpr T* allocate(const size_type n) {
             if (n==0) return nullptr;
             if (n > static_cast<size_type>(-1) / sizeof(T)) {
                 throw std::bad_alloc();
             }
-            return static_cast<T*>(::operator new(sizeof(T) * n));
+            if constexpr (alignof(T) > __STDCPP_DEFAULT_NEW_ALIGNMENT__) {
+                return static_cast<T*>(::operator new(sizeof(T) * n, std::align_val_t(alignof(T))));
+            } else {
+                return static_cast<T*>(::operator new(sizeof(T) * n));
+            }
         }
 
         static constexpr void deallocate(T* ptr) {
             if (ptr==nullptr) return;
-            ::operator delete(ptr);
+            if constexpr (alignof(T) > __STDCPP_DEFAULT_NEW_ALIGNMENT__) {
+                ::operator delete(ptr, std::align_val_t(alignof(T)));
+            } else {
+                ::operator delete(ptr);
+            }
         }
 
-        static constexpr void deallocate(T* ptr, size_type n) {
-            if (ptr==nullptr) return;
-            ::operator delete(ptr);
+        static constexpr void deallocate(T* ptr, size_type) {
+            deallocate(ptr);
         }
 
         static constexpr void construct(T* ptr) {mystl::construct(ptr);}
 
         static constexpr void construct(T* ptr, const T& value) {mystl::construct(ptr, value);}
 
-        static constexpr void construct(T* ptr, T&& value) {mystl::construct(ptr, move(value));}
+        static constexpr void construct(T* ptr, T&& value) {mystl::construct(ptr, mystl::move(value));}
 
         template <typename... Args>
-        static constexpr void construct(T* ptr, Args&&... args) {mystl::construct(ptr, forward<Args>(args)...);}
+        static constexpr void construct(T* ptr, Args&&... args) {mystl::construct(ptr, mystl::forward<Args>(args)...);}
 
         static constexpr void destroy(T* ptr) {mystl::destroy_at(ptr);}
 
@@ -88,6 +95,31 @@ namespace mystl {
         struct alloc_has_rebind : false_type {};
         template <typename Alloc, typename T>
         struct alloc_has_rebind<Alloc, T, void_t<typename Alloc::template rebind<T>::other>> : true_type {};
+
+        template <typename Alloc, typename = void>
+        struct alloc_copy_propagation { using type = false_type; };
+        template <typename Alloc>
+        struct alloc_copy_propagation<Alloc, void_t<typename Alloc::propagate_on_container_copy_assignment>> {
+            using type = typename Alloc::propagate_on_container_copy_assignment;
+        };
+        template <typename Alloc, typename = void>
+        struct alloc_move_propagation { using type = false_type; };
+        template <typename Alloc>
+        struct alloc_move_propagation<Alloc, void_t<typename Alloc::propagate_on_container_move_assignment>> {
+            using type = typename Alloc::propagate_on_container_move_assignment;
+        };
+        template <typename Alloc, typename = void>
+        struct alloc_swap_propagation { using type = false_type; };
+        template <typename Alloc>
+        struct alloc_swap_propagation<Alloc, void_t<typename Alloc::propagate_on_container_swap>> {
+            using type = typename Alloc::propagate_on_container_swap;
+        };
+        template <typename Alloc, typename = void>
+        struct alloc_always_equal { using type = is_empty<Alloc>; };
+        template <typename Alloc>
+        struct alloc_always_equal<Alloc, void_t<typename Alloc::is_always_equal>> {
+            using type = typename Alloc::is_always_equal;
+        };
     }
 
     // *************************************************************************************
@@ -103,15 +135,13 @@ namespace mystl {
         using difference_type       = typename Alloc::difference_type;
         using size_type             = typename Alloc::size_type;
 
-        using propagate_on_container_copy_assignment = false_type;
-        using propagate_on_container_move_assignment = false_type;
-        using propagate_on_container_swap            = false_type;
-        using is_always_equal                        = true_type;
+        using propagate_on_container_copy_assignment = typename detail::alloc_copy_propagation<Alloc>::type;
+        using propagate_on_container_move_assignment = typename detail::alloc_move_propagation<Alloc>::type;
+        using propagate_on_container_swap            = typename detail::alloc_swap_propagation<Alloc>::type;
+        using is_always_equal                        = typename detail::alloc_always_equal<Alloc>::type;
 
         template <typename T>
-        struct rebind_alloc {
-            using type = Alloc::template rebind<T>::other;
-        };
+        using rebind_alloc = typename Alloc::template rebind<T>::other;
 
         template <typename T>
         using rebind_traits = allocator_traits<rebind_alloc<T>>;
@@ -126,7 +156,7 @@ namespace mystl {
 
         template <typename T, typename... Args>
         static constexpr void construct(Alloc& alloc, T* p, Args&&... args) {
-            if constexpr (detail::has_construct<Alloc, T, Args...>::value) {
+            if constexpr (detail::has_construct<Alloc, void, T, Args...>::value) {
                 alloc.construct(p, mystl::forward<Args>(args)...);
             }else {
                 ::new(static_cast<void*>(p)) T(mystl::forward<Args>(args)...);
@@ -154,18 +184,13 @@ namespace mystl {
     // destroy with allocator
     template <typename T, typename Allocator>
     constexpr void destroy_at_a(T* ptr, Allocator& alloc) noexcept {
-        if constexpr (!is_trivially_destructible_v<T>) {
-            allocator_traits<Allocator>::destroy(alloc, ptr);
-        }
+        allocator_traits<Allocator>::destroy(alloc, ptr);
     }
 
     template <typename Forward_Iterator, typename Allocator>
     constexpr void destroy_a(Forward_Iterator first, Forward_Iterator last, Allocator& alloc) noexcept {
-        using value_type = iter_value_type<Forward_Iterator>;
-        if constexpr (!is_trivially_destructible_v<value_type>) {
-            for (; first != last; ++first) {
-                allocator_traits<Allocator>::destroy(alloc, mystl::addressof(*first));
-            }
+        for (; first != last; ++first) {
+            allocator_traits<Allocator>::destroy(alloc, mystl::addressof(*first));
         }
     }
 
