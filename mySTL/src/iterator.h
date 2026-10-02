@@ -72,7 +72,7 @@ namespace mystl {
 
     // is_iterator_of
     template <typename T, typename U, bool = has_iterator_cat_v<iterator_traits<T>>>
-    struct is_iterator_of : bool_constant<is_convertible_v<iter_category<T>, U>> {};
+    struct is_iterator_of : bool_constant<is_base_of_v<U, iter_category<T>>> {};
     template <typename T, typename U>
     struct is_iterator_of<T, U, false> : false_type {};
     template <typename T, typename U>
