@@ -16,7 +16,7 @@
 #include <utility>
 #include <vector>
 
-// C++17 的只移动 void() 包装。小对象直接存储，其他对象在堆上存储。
+// C++20 的只移动 void() 包装。小对象直接存储，其他对象在堆上存储。
 // 内联对象必须能无异常移动；因此包装本身的移动操作始终 noexcept。
 class MoveOnlyTask {
 public:
@@ -184,7 +184,7 @@ private:
 };
 
 
-// 一个简单的 C++17 固定大小线程池。
+// 一个简单的 C++20 固定大小线程池。
 //
 // - 任务由 MoveOnlyTask 管理，直接持有 packaged_task，无需 shared_ptr 包装。
 // - submit() 返回 std::future，任务返回值和异常都可以被调用者获取。

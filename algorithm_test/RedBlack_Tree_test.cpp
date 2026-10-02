@@ -2,6 +2,7 @@
 #include <unordered_set>
 #include <algorithm>
 #include <set>
+#include <random>
 
 using namespace std;
 
@@ -465,7 +466,8 @@ int main() {
 
     // 删除测试
     vector<int> del_target=tree_set.inorder();
-    random_shuffle(del_target.begin(), del_target.end());
+    std::mt19937 shuffle_engine(std::random_device{}());
+    std::shuffle(del_target.begin(), del_target.end(), shuffle_engine);
     start = chrono::high_resolution_clock::now();
     for (int x: del_target) {
         s.erase(x);

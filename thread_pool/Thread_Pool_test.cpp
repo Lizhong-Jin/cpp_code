@@ -1,4 +1,4 @@
-// Standalone C++17 tests; see README.md for build and sanitizer commands.
+// Standalone C++20 tests; see README.md for build and sanitizer commands.
 #include "Thread_Pool.hpp"
 #include "Thread_Pool_benchmark.hpp"
 

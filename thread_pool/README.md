@@ -1,14 +1,14 @@
 # 线程池功能与性能测试 / Thread pool functional tests and benchmarks
 
-独立的 C++17 测试程序，无第三方测试框架依赖。功能测试在 `Thread_Pool_test.cpp`，性能测试在 `Thread_Pool_benchmark.cpp`，共同编译为一个可执行文件。默认先运行全部功能测试，通过后再运行性能测试。以下命令均在本目录执行。
+独立的 C++20 测试程序，无第三方测试框架依赖。功能测试在 `Thread_Pool_test.cpp`，性能测试在 `Thread_Pool_benchmark.cpp`，共同编译为一个可执行文件。默认先运行全部功能测试，通过后再运行性能测试。以下命令均在本目录执行。
 
-Standalone C++17 tests with no third-party test framework. Functional tests and benchmarks live in separate source files but share one executable. By default, all functional tests run first; benchmarks follow only if they pass. Run the commands below from this directory.
+Standalone C++20 tests with no third-party test framework. Functional tests and benchmarks live in separate source files but share one executable. By default, all functional tests run first; benchmarks follow only if they pass. Run the commands below from this directory.
 
 ## 编译与运行 / Build and run
 
 ```sh
 mkdir -p build
-c++ -std=c++17 -O2 -Wall -Wextra -Wpedantic -pthread Thread_Pool_test.cpp Thread_Pool_benchmark.cpp -o build/thread_pool_tests
+c++ -std=c++20 -O2 -Wall -Wextra -Wpedantic -pthread Thread_Pool_test.cpp Thread_Pool_benchmark.cpp -o build/thread_pool_tests
 ./build/thread_pool_tests
 ```
 
@@ -45,7 +45,7 @@ ctest --test-dir build/cmake -C Release -V
 
 Each test has a 15-second watchdog. Failures return a nonzero exit code, and checks remain enabled under `NDEBUG`. Synchronization establishes ordering without fixed sleeps.
 
-当前 `Thread_Pool.hpp` 内的 `MoveOnlyTask` 是 C++17 的 `void()` 任务包装：提供 32 字节、`max_align_t` 对齐的内联存储，仅对大小/对齐适合且移动构造不抛异常的对象启用；其他对象使用堆存储。禁止复制，移动构造与赋值为 `noexcept`，移动后源对象为空；空任务调用抛出 `std::bad_function_call`。线程池在锁外直接包装 `packaged_task`，去掉外层 `shared_ptr`，但仍保留 future 共享状态。baseline 保留原有实现。
+当前 `Thread_Pool.hpp` 内的 `MoveOnlyTask` 是 C++20 的 `void()` 任务包装：提供 32 字节、`max_align_t` 对齐的内联存储，仅对大小/对齐适合且移动构造不抛异常的对象启用；其他对象使用堆存储。禁止复制，移动构造与赋值为 `noexcept`，移动后源对象为空；空任务调用抛出 `std::bad_function_call`。线程池在锁外直接包装 `packaged_task`，去掉外层 `shared_ptr`，但仍保留 future 共享状态。baseline 保留原有实现。
 
 `MoveOnlyTask` lives in `Thread_Pool.hpp`. Its 32-byte buffer, aligned to `max_align_t`, stores fitting, nothrow-movable callables inline; other callables use heap storage. Copies are disabled, moves are noexcept and empty the source, and invoking an empty task throws `std::bad_function_call`. The pool wraps `packaged_task` outside the queue lock without an outer `shared_ptr`; future shared state remains. Baseline retains the original implementation.
 
@@ -127,10 +127,10 @@ Each configuration warms up once and runs three trials in rotating implementatio
 With a supporting Clang/GCC toolchain, build memory and thread checks separately:
 
 ```sh
-c++ -std=c++17 -g -O1 -pthread -fsanitize=address,undefined -fno-omit-frame-pointer Thread_Pool_test.cpp Thread_Pool_benchmark.cpp -o build/thread_pool_asan
+c++ -std=c++20 -g -O1 -pthread -fsanitize=address,undefined -fno-omit-frame-pointer Thread_Pool_test.cpp Thread_Pool_benchmark.cpp -o build/thread_pool_asan
 ./build/thread_pool_asan --functional-only
 
-c++ -std=c++17 -g -O1 -pthread -fsanitize=thread Thread_Pool_test.cpp Thread_Pool_benchmark.cpp -o build/thread_pool_tsan
+c++ -std=c++20 -g -O1 -pthread -fsanitize=thread Thread_Pool_test.cpp Thread_Pool_benchmark.cpp -o build/thread_pool_tsan
 ./build/thread_pool_tsan --functional-only
 ```
 

@@ -142,24 +142,24 @@ namespace mystl {
 
     constexpr std::size_t strspn(const char* s, const char* accept) noexcept {
         bool table[256]={false};
-        for (auto p=reinterpret_cast<const unsigned char *>(accept); *p; ++p) table[*p]=true;
-        std::size_t n=0; auto q=reinterpret_cast<const unsigned char *>(s);
-        while (*q && table[*q]) {++n; ++q;}
+        for (auto p=accept; *p; ++p) table[static_cast<unsigned char>(*p)]=true;
+        std::size_t n=0; auto q=s;
+        while (*q && table[static_cast<unsigned char>(*q)]) {++n; ++q;}
         return n;
     }
 
     constexpr std::size_t strcspn(const char* s, const char* reject) noexcept {
         bool table[256]={false};
-        for (auto p=reinterpret_cast<const unsigned char *>(reject); *p; ++p) table[*p]=true;
-        std::size_t n=0; auto q=reinterpret_cast<const unsigned char *>(s);
-        while (*q && !table[*q]) {++n; ++q;}
+        for (auto p=reject; *p; ++p) table[static_cast<unsigned char>(*p)]=true;
+        std::size_t n=0; auto q=s;
+        while (*q && !table[static_cast<unsigned char>(*q)]) {++n; ++q;}
         return n;
     }
 
     constexpr char* strpbrk(char* s, const char* accept) noexcept {
         bool table[256]={false};
-        for (auto p=reinterpret_cast<const unsigned char *>(accept); *p; ++p) table[*p]=true;
-        for (auto q=reinterpret_cast<unsigned char *>(s); *q; ++q) if (table[*q]) return reinterpret_cast<char *>(q);
+        for (auto p=accept; *p; ++p) table[static_cast<unsigned char>(*p)]=true;
+        for (auto q=s; *q; ++q) if (table[static_cast<unsigned char>(*q)]) return q;
         return nullptr;
     }
 
@@ -167,7 +167,7 @@ namespace mystl {
         return const_cast<const char*>(strpbrk(const_cast<char*>(s), accept));
     }
 
-    constexpr char* strtok(char* s, const char* delim) noexcept {
+    inline char* strtok(char* s, const char* delim) noexcept {
         static char* save=nullptr;
         char* p=s?s:save;
         if (p == nullptr) return nullptr;

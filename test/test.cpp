@@ -6,19 +6,19 @@
 #include <unordered_set>
 #include <unordered_map>
 #include <ranges>
+#include <stdexcept>
 using namespace std;
 
 class Solution {
 public:
     vector<string> braceExpansionII(string expression) {
         vector<string> temp, res;
-        vector<string> new_temp;
         int n=expression.size();
 
         auto update_res=[&]()->void{
             if(temp.empty()) return;
             if(res.empty()){
-                res.move(temp);
+                res = std::move(temp);
                 return;
             }
             for(auto& s: temp){
@@ -28,47 +28,52 @@ public:
             }
         };
 
-        for(int i=0, j=0; i<n; ){
+        for(int i=0; i<n; ){
             char c=expression[i];
+            if(c==','){
+                update_res();
+                temp.clear();
+                ++i;
+                continue;
+            }
+
+            vector<string> sub_strs;
             if(c>='a'&&c<='z'){
+                int j=i;
                 while (j<n&&expression[j]>='a'&&expression[j]<='z') ++j;
-                if(temp.empty()) temp.emplace_back(expression.substr(i, j-i));
-                else{
-                    string s = expression.substr(i, j-i);
-                    for(auto& r_s: res){
-                        r_s += s;
-                    }
-                }
+                sub_strs.emplace_back(expression.substr(i, j-i));
                 i=j;
             }else if(c=='{'){
                 int sta=1;
-                ++j;
-                while(sta>0){
+                int j=i+1;
+                while(j<n && sta>0){
                     if(expression[j]=='{') ++sta;
                     else if(expression[j]=='}') --sta;
                     ++j;
                 }
-                vector<string> sub_strs=braceExpansionII(expression.substr(i+1, j-i-2));
-                if(temp.empty()) temp=move(sub_strs);
+                if(sta!=0) throw invalid_argument("unmatched brace");
+                sub_strs=braceExpansionII(expression.substr(i+1, j-i-2));
+                i=j;
             }else{
-                new_temp.clear();
+                throw invalid_argument("unexpected character in brace expression");
+            }
+
+            if(temp.empty()) temp=std::move(sub_strs);
+            else{
+                vector<string> new_temp;
                 for(auto& s: temp){
                     for(auto& s_s: sub_strs){
                         new_temp.emplace_back(s+s_s);
                     }
                 }
-                temp=move(new_temp);
+                temp=std::move(new_temp);
             }
-            i=j;
-        }else if(c==','){
-            update_res();
-            temp.clear()
-            ++i; ++j;
         }
+        update_res();
+        sort(res.begin(), res.end());
+        res.erase(unique(res.begin(), res.end()), res.end());
+        return res;
     }
-    update_res();
-    return res;
-}
 };
 
 int main() {
@@ -78,4 +83,5 @@ int main() {
     for (auto& r: result) {
         cout << r << endl;
     }
+    return 0;
 }

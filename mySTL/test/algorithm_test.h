@@ -26,7 +26,7 @@ namespace mystl_test {
 
     // **********************************************************************************
     // is_sorted
-    constexpr bool is_sorted_correctness_test() {
+    inline bool is_sorted_correctness_test() {
         constexpr int test_time = 100;
         std::random_device rd;
         std::mt19937 gen(rd());
@@ -44,7 +44,7 @@ namespace mystl_test {
         return true;
     }
 
-    constexpr void is_sorted_efficiency_test() {
+    inline void is_sorted_efficiency_test() {
         constexpr int test_time = 10;
         std::random_device rd;
         std::mt19937 gen(rd());
@@ -80,7 +80,7 @@ namespace mystl_test {
     }
 
     // is_sorted_until
-    constexpr bool is_sorted_until_correctness_test() {
+    inline bool is_sorted_until_correctness_test() {
         constexpr int test_time = 100;
         std::random_device rd;
         std::mt19937 gen(rd());
@@ -100,7 +100,7 @@ namespace mystl_test {
     }
 
     // sort
-    constexpr bool sort_correctness_test() {
+    inline bool sort_correctness_test() {
         constexpr int test_time = 100;
         std::random_device rd;
         std::mt19937 gen(rd());
@@ -122,7 +122,7 @@ namespace mystl_test {
         return true;
     }
 
-    constexpr void sort_efficiency_test() {
+    inline void sort_efficiency_test() {
         constexpr int test_time = 10;
         std::random_device rd;
         std::mt19937 gen(rd());
@@ -156,7 +156,7 @@ namespace mystl_test {
     }
 
     // partial_sort
-    constexpr bool partial_sort_correctness_test() {
+    inline bool partial_sort_correctness_test() {
         constexpr int test_time = 100;
         std::random_device rd;
         std::mt19937 gen(rd());
@@ -181,7 +181,7 @@ namespace mystl_test {
     }
 
     // partial_sort_copy
-    constexpr bool partial_sort_copy_correctness_test() {
+    inline bool partial_sort_copy_correctness_test() {
         constexpr int test_time = 100;
         std::random_device rd;
         std::mt19937 gen(rd());
@@ -206,7 +206,7 @@ namespace mystl_test {
     }
 
     // stable_sort
-    constexpr bool stable_sort_correctness_test() {
+    inline bool stable_sort_correctness_test() {
         constexpr int test_time = 100;
         std::random_device rd;
         std::mt19937 gen(rd());
@@ -236,7 +236,7 @@ namespace mystl_test {
     }
 
     // nth_element
-    constexpr bool nth_element_correctness_test() {
+    inline bool nth_element_correctness_test() {
         constexpr int test_time = 100;
         std::random_device rd;
         std::mt19937 gen(rd());
@@ -260,7 +260,7 @@ namespace mystl_test {
 
     // **********************************************************************************
     // lower_bound
-    constexpr bool lower_bound_correctness_test() {
+    inline bool lower_bound_correctness_test() {
         constexpr int test_time = 10;
         std::random_device rd;
         std::mt19937 gen(rd());
@@ -282,7 +282,7 @@ namespace mystl_test {
     }
 
     // upper_bound
-    constexpr bool upper_bound_correctness_test() {
+    inline bool upper_bound_correctness_test() {
         constexpr int test_time = 10;
         std::random_device rd;
         std::mt19937 gen(rd());
@@ -304,7 +304,7 @@ namespace mystl_test {
     }
 
     // binary_search
-    constexpr bool binary_search_correctness_test() {
+    inline bool binary_search_correctness_test() {
         constexpr int test_time = 10;
         std::random_device rd;
         std::mt19937 gen(rd());
@@ -326,7 +326,7 @@ namespace mystl_test {
     }
 
     // equal_range
-    constexpr bool equal_range_correctness_test() {
+    inline bool equal_range_correctness_test() {
         constexpr int test_time = 10;
         std::random_device rd;
         std::mt19937 gen(rd());
@@ -351,7 +351,7 @@ namespace mystl_test {
 
 } // namespace mystl_test
 
-constexpr void sort_algorithm_correctness_test() {
+inline void sort_algorithm_correctness_test() {
     std::cout << "*****************************************************************" << std::endl;
     std::cout << " sort algorithm correctness test start" << std::endl;
     std::cout << "*****************************************************************" << std::endl;
@@ -377,7 +377,7 @@ constexpr void sort_algorithm_correctness_test() {
     std::cout << std::endl;
 }
 
-constexpr void sort_algorithm_efficiency_test() {
+inline void sort_algorithm_efficiency_test() {
     std::cout << "*****************************************************************" << std::endl;
     std::cout << " sort algorithm efficiency test start" << std::endl;
     std::cout << "*****************************************************************" << std::endl;
@@ -391,7 +391,7 @@ constexpr void sort_algorithm_efficiency_test() {
     std::cout << std::endl;
 }
 
-constexpr void binary_search_algorithm_correctness_test() {
+inline void binary_search_algorithm_correctness_test() {
     std::cout << "*****************************************************************" << std::endl;
     std::cout << " binary search algorithm correctness test start" << std::endl;
     std::cout << "*****************************************************************" << std::endl;
@@ -410,7 +410,7 @@ constexpr void binary_search_algorithm_correctness_test() {
     std::cout << "*****************************************************************" << std::endl;
 }
 
-constexpr void binary_search_algorithm_efficiency_test() {
+inline void binary_search_algorithm_efficiency_test() {
     std::cout << "*****************************************************************" << std::endl;
     std::cout << " binary search algorithm efficiency test start" << std::endl;
     std::cout << "*****************************************************************" << std::endl;
@@ -423,12 +423,12 @@ constexpr void binary_search_algorithm_efficiency_test() {
     std::cout << std::endl;
 }
 
-constexpr void algorithm_correctness_test() {
+inline void algorithm_correctness_test() {
     sort_algorithm_correctness_test();
     binary_search_algorithm_correctness_test();
 }
 
-constexpr void algorithm_efficiency_test() {
+inline void algorithm_efficiency_test() {
     sort_algorithm_efficiency_test();
     //binary_search_algorithm_efficiency_test();
 }

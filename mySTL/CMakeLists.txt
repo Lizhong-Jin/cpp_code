@@ -1,17 +1,7 @@
 cmake_minimum_required(VERSION 3.31)
 project(mySTL)
 
-# Some CMake versions do not yet map AppleClang's C++26 mode to -std=c++2c.
-if(CMAKE_CXX_COMPILER_ID STREQUAL "AppleClang" AND NOT CMAKE_CXX26_STANDARD_COMPILE_OPTION)
-    include(CheckCXXCompilerFlag)
-    check_cxx_compiler_flag("-std=c++2c" MYSTL_HAS_CXX2C)
-    if(MYSTL_HAS_CXX2C)
-        set(CMAKE_CXX26_STANDARD_COMPILE_OPTION "-std=c++2c")
-        set(CMAKE_CXX26_EXTENSION_COMPILE_OPTION "-std=gnu++2c")
-    endif()
-endif()
-
-set(CMAKE_CXX_STANDARD 26)
+set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 

@@ -5,6 +5,8 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstdint>
+#include <algorithm>
+#include <forward_list>
 #include <string>
 #include <stdexcept>
 #include <type_traits>
@@ -12,6 +14,19 @@
 #define CHECK(...) do { if (!(__VA_ARGS__)) { \
     std::fprintf(stderr, "check failed at line %d: %s\n", __LINE__, #__VA_ARGS__); \
     std::abort(); } } while (false)
+
+static_assert(mystl::strspn("abca!", "abc") == 4);
+static_assert(mystl::strspn("abc", "") == 0);
+static_assert(mystl::strcspn("abca!", "!") == 4);
+static_assert(mystl::strcspn("", "abc") == 0);
+static_assert(mystl::strpbrk("abc", "x") == nullptr);
+static_assert(*mystl::strpbrk("abc", "cb") == 'b');
+constexpr int permutation_source[] = {1, 2, 1};
+constexpr int permutation_match[] = {1, 1, 2};
+constexpr int permutation_mismatch[] = {1, 2, 2};
+static_assert(mystl::is_permutation(permutation_source, permutation_source + 3, permutation_match));
+static_assert(!mystl::is_permutation(permutation_source, permutation_source + 3, permutation_mismatch));
+static_assert(mystl::is_permutation(permutation_source, permutation_source, permutation_match));
 
 static_assert(mystl::is_same_v<mystl::remove_cv_ref_t<const int&>, int>);
 static_assert(mystl::is_same_v<mystl::remove_pointer_t<const int*>, const int>);
@@ -280,6 +295,16 @@ void test_function() {
 }
 
 void test_cstring_and_exceptions() {
+    const char high_bytes[] = {'\x80', '\xff', 'a', '\0'};
+    CHECK(mystl::strspn(high_bytes, "\x80\xff") == 2);
+    CHECK(mystl::strcspn(high_bytes, "\xff") == 1);
+    CHECK(mystl::strpbrk(high_bytes, "\xff") == high_bytes + 1);
+    char tokens[] = ",alpha,,beta;gamma;";
+    CHECK(mystl::strcmp(mystl::strtok(tokens, ",;"), "alpha") == 0);
+    CHECK(mystl::strcmp(mystl::strtok(nullptr, ",;"), "beta") == 0);
+    CHECK(mystl::strcmp(mystl::strtok(nullptr, ",;"), "gamma") == 0);
+    CHECK(mystl::strtok(nullptr, ",;") == nullptr);
+    CHECK(mystl::strtok(nullptr, ",;") == nullptr);
     const char text[] = "abc";
     CHECK(mystl::memchr(text, 'b', 3) == text + 1);
     CHECK(mystl::memchr(text, 'x', 3) == nullptr);
@@ -296,10 +321,28 @@ void test_cstring_and_exceptions() {
     CHECK(mystl::strcmp(copy.what(), "mystl::exception") == 0);
 }
 
+void test_permutation() {
+    const std::forward_list<int> source{1, 2, 1, 3};
+    const std::forward_list<int> matching{3, 1, 2, 1};
+    const std::forward_list<int> different{3, 1, 2, 2};
+    CHECK(mystl::is_permutation(source.begin(), source.end(), matching.begin()));
+    CHECK(!mystl::is_permutation(source.begin(), source.end(), different.begin()));
+    // Compare all three-element sequences over {0, 1, 2}, including duplicates.
+    for (int a = 0; a < 27; ++a) {
+        int first[] = {a / 9, a / 3 % 3, a % 3};
+        for (int b = 0; b < 27; ++b) {
+            int second[] = {b / 9, b / 3 % 3, b % 3};
+            CHECK(mystl::is_permutation(first, first + 3, second) ==
+                  std::is_permutation(first, first + 3, second));
+        }
+    }
+}
+
 int main() {
     test_memory();
     test_unique_ptr();
     test_function();
     test_cstring_and_exceptions();
+    test_permutation();
     std::puts("core regression tests passed");
 }

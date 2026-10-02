@@ -17,7 +17,7 @@
 
 namespace baseline {
 
-// 一个简单的 C++17 固定大小线程池。
+// 一个简单的 C++20 固定大小线程池。
 //
 // - 任务由 std::function 管理，无需手动 malloc/free。
 // - submit() 返回 std::future，任务返回值和异常都可以被调用者获取。
@@ -103,7 +103,7 @@ public:
                 throw std::runtime_error("ThreadPool task queue is full");
             }
 
-            // std::function 在 C++17 中要求目标可复制；shared_ptr 用来包装
+            // std::function 在 C++20 中要求目标可复制；shared_ptr 用来包装
             // 只能移动的 packaged_task。
             tasks_.emplace([task] { (*task)(); });
         }

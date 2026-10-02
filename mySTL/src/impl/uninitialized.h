@@ -418,7 +418,7 @@ namespace mystl {
     template<typename Input_Iterator, typename Forward_Iterator>
     constexpr Forward_Iterator uninitialized_copy(Input_Iterator first, Input_Iterator last, Forward_Iterator result) {
         if (first == last) return result;
-        static constexpr bool use_trivial = detail::use_trivial_copy<Input_Iterator, Forward_Iterator>::value;
+        constexpr bool use_trivial = detail::use_trivial_copy<Input_Iterator, Forward_Iterator>::value;
         if constexpr (use_trivial) {
             using T = iter_value_type<Forward_Iterator>;
             const T *src_first = mystl::to_address(first);
@@ -443,7 +443,7 @@ namespace mystl {
     // uninitialized_copy_n
     template <typename Input_Iterator, typename Size, typename Forward_Iterator>
     constexpr Forward_Iterator uninitialized_copy_n(Input_Iterator first, Size n, Forward_Iterator result) {
-        static constexpr bool use_trivial = detail::use_trivial_copy<Input_Iterator, Forward_Iterator>::value;
+        constexpr bool use_trivial = detail::use_trivial_copy<Input_Iterator, Forward_Iterator>::value;
         if constexpr (use_trivial) {
             using T = iter_value_type<Forward_Iterator>;
             const T *src_first = mystl::to_address(first);
@@ -497,7 +497,7 @@ namespace mystl {
     template <typename Input_Iterator, typename Forward_Iterator>
     constexpr Forward_Iterator uninitialized_move(Input_Iterator first, Input_Iterator last, Forward_Iterator result) {
         if (first == last) return result;
-        static constexpr bool use_trivial = detail::use_trivial_move<Input_Iterator, Forward_Iterator>::value;
+        constexpr bool use_trivial = detail::use_trivial_move<Input_Iterator, Forward_Iterator>::value;
         if constexpr (use_trivial) {
             using T = iter_value_type<Forward_Iterator>;
             const T *src_first = mystl::to_address(first);
@@ -522,7 +522,7 @@ namespace mystl {
     // uninitialized_move_n
     template <typename Input_Iterator, typename Size, typename Forward_Iterator>
     constexpr Forward_Iterator uninitialized_move_n(Input_Iterator first, Size n, Forward_Iterator result) {
-        static constexpr bool use_trivial = detail::use_trivial_move<Input_Iterator, Forward_Iterator>::value;
+        constexpr bool use_trivial = detail::use_trivial_move<Input_Iterator, Forward_Iterator>::value;
         if constexpr (use_trivial) {
             using T = iter_value_type<Forward_Iterator>;
             const T *src_first = mystl::to_address(first);

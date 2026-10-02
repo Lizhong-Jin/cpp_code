@@ -61,48 +61,39 @@ template<int n> std::ostream& operator<<(std::ostream& out, const vec<n>& v) {
 }
 
 template<> struct vec<2> {
-    union {
-        struct {double x,y;};
-        double data[2];
-    };
+    double x, y;
     vec(double _x=0, double _y=0): x(_x), y(_y) {}
     double& operator[](const int i) {
         assert(i>=0 && i<2);
-        return data[i];
+        return i == 0 ? x : y;
     }
     double operator[](const int i) const {
         assert(i>=0 && i<2);
-        return data[i];
+        return i == 0 ? x : y;
     }
 };
 template<> struct vec<3> {
-    union {
-        struct {double x,y,z;};
-        double data[3];
-    };
+    double x, y, z;
     vec(double _x=0, double _y=0, double _z=0): x(_x), y(_y), z(_z) {}
     double& operator[](const int i) {
         assert(i>=0 && i<3);
-        return data[i];
+        return i == 0 ? x : (i == 1 ? y : z);
     }
     double operator[](const int i) const {
         assert(i>=0 && i<3);
-        return data[i];
+        return i == 0 ? x : (i == 1 ? y : z);
     }
 };
 template<> struct vec<4> {
-    union {
-        struct {double x,y,z,w;};
-        double data[4];
-    };
+    double x, y, z, w;
     vec(double _x=0, double _y=0, double _z=0, double _w=0): x(_x), y(_y), z(_z), w(_w) {}
     double& operator[](const int i) {
         assert(i>=0 && i<4);
-        return data[i];
+        return i == 0 ? x : (i == 1 ? y : (i == 2 ? z : w));
     }
     double operator[](const int i) const {
         assert(i>=0 && i<4);
-        return data[i];
+        return i == 0 ? x : (i == 1 ? y : (i == 2 ? z : w));
     }
     vec<2> xy() const {return {x,y};};
     vec<3> xyz() const {return {x,y,z};}

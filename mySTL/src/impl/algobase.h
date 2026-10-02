@@ -958,7 +958,27 @@ namespace mystl {
     // is_permutation
     template <typename Forward_Iterator1, typename Forward_Iterator2>
     constexpr bool is_permutation(Forward_Iterator1 first1, Forward_Iterator1 last1, Forward_Iterator2 first2) {
+        while (first1 != last1 && *first1 == *first2) {
+            ++first1;
+            ++first2;
+        }
+        if (first1 == last1) return true;
 
+        auto last2 = first2;
+        for (auto it = first1; it != last1; ++it) ++last2;
+        for (auto it = first1; it != last1; ++it) {
+            auto previous = first1;
+            while (previous != it && !(*previous == *it)) ++previous;
+            if (previous != it) continue;
+
+            std::size_t count1 = 0, count2 = 0;
+            for (auto current = it; current != last1; ++current)
+                if (*current == *it) ++count1;
+            for (auto current = first2; current != last2; ++current)
+                if (*current == *it) ++count2;
+            if (count1 != count2) return false;
+        }
+        return true;
     }
 
 } // namespace mystl

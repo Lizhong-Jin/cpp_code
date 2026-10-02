@@ -11,7 +11,7 @@ namespace mystl_test {
     // Primary type categories test
     void foo();
 
-    constexpr void is_void_test() {
+    inline void is_void_test() {
         using mystl::void_t;
         using mystl::is_void;
         using mystl::is_void_v;
@@ -29,7 +29,7 @@ namespace mystl_test {
         std::cout << "is_void test accomplished" << std::endl;
     }
 
-    constexpr void is_null_pointer_test() {
+    inline void is_null_pointer_test() {
         using mystl::is_null_pointer_v;
         static_assert(is_null_pointer_v<decltype(nullptr)>);
         static_assert(!is_null_pointer_v<int*>);
@@ -38,7 +38,7 @@ namespace mystl_test {
 
 
 
-    constexpr void is_integral_test() {
+    inline void is_integral_test() {
         using mystl::is_integral_v;
         static_assert(
             is_integral_v<float> == false &&
@@ -51,12 +51,12 @@ namespace mystl_test {
         std::cout << "is_integral test accomplished" << std::endl;
     }
 
-    constexpr void is_floating_point_test() {
+    inline void is_floating_point_test() {
         using mystl::is_floating_point_v;
         std::cout << "is_floating test accomplished" << std::endl;
     }
 
-    constexpr void is_pointer_test() {
+    inline void is_pointer_test() {
         using mystl::is_pointer_v;
         static_assert(!is_pointer_v<decltype(nullptr)>);
         static_assert(is_pointer_v<int*>);
@@ -64,7 +64,7 @@ namespace mystl_test {
     }
 } // namespace mystl_test
 
-constexpr void primary_type_test() {
+inline void primary_type_test() {
     std::cout << "**********************************************************************************" << std::endl;
     std::cout << "primary type test start" << std::endl;
     std::cout << "**********************************************************************************" << std::endl;
@@ -79,7 +79,7 @@ constexpr void primary_type_test() {
     std::cout << std::endl;
 }
 
-constexpr void type_traits_test() {
+inline void type_traits_test() {
     primary_type_test();
 }
 

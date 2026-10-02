@@ -1,9 +1,13 @@
 cmake_minimum_required(VERSION 3.16)
 project(thread_pool_tests LANGUAGES CXX)
 
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
+
 find_package(Threads REQUIRED)
 add_executable(thread_pool_tests Thread_Pool_test.cpp Thread_Pool_benchmark.cpp)
-target_compile_features(thread_pool_tests PRIVATE cxx_std_17)
+target_compile_features(thread_pool_tests PRIVATE cxx_std_20)
 set_target_properties(thread_pool_tests PROPERTIES CXX_EXTENSIONS OFF)
 target_link_libraries(thread_pool_tests PRIVATE Threads::Threads)
 if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
