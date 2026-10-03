@@ -488,7 +488,7 @@ namespace mystl {
     template <typename T, typename = void>
     struct is_move_constructible : false_type {};
     template <typename T>
-    struct is_move_constructible<T, decltype(void(declval<T&&>()))> : true_type {};
+    struct is_move_constructible<T, void_t<decltype(T(declval<T&&>()))>> : true_type {};
     template <typename T>
     inline constexpr bool is_move_constructible_v = is_move_constructible<T>::value;
 
@@ -510,7 +510,7 @@ namespace mystl {
     template <typename T, typename = void>
     struct is_copy_assignable : false_type {};
     template <typename T>
-    struct is_copy_assignable<T, decltype(declval<T&>() = declval<const T&>())> : true_type {};
+    struct is_copy_assignable<T, void_t<decltype(declval<T&>() = declval<const T&>())>> : true_type {};
     template <typename T>
     inline constexpr bool is_copy_assignable_v = is_copy_assignable<T>::value;
 

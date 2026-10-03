@@ -768,6 +768,38 @@ namespace mystl {
             }
         }
 
+        // erase, erase the element at position pos
+        constexpr iterator erase(const_iterator pos) {
+            MYSTL_DEBUG(pos >= begin() && pos < end());
+            pointer erase_pos = this -> M_impl._begin + (pos - cbegin());
+            if (erase_pos + 1 != this -> M_impl._end) {
+                if constexpr (is_nothrow_move_assignable_v<value_type> || !is_copy_assignable_v<value_type>) {
+                    mystl::move(erase_pos + 1, this -> M_impl._end, erase_pos);
+                } else {
+                    mystl::copy(erase_pos + 1, this -> M_impl._end, erase_pos);
+                }
+            }
+            --this -> M_impl._end;
+            Allocator_traits::destroy(get_T_allocator(), this -> M_impl._end);
+            return erase_pos;
+        }
+
+        constexpr iterator erase(const_iterator first, const_iterator last) {
+            MYSTL_DEBUG(first >= begin() && first <= end() && last >= begin() && last <= end() && first <= last);
+            if (first == last) return const_cast<iterator>(first);
+            pointer erase_first = this -> M_impl._begin + (first - cbegin());
+            pointer erase_last = this -> M_impl._begin + (last - cbegin());
+            pointer new_end = this -> M_impl._end - (erase_last - erase_first);
+            if constexpr (is_nothrow_move_assignable_v<value_type> || !is_copy_assignable_v<value_type>) {
+                mystl::move(erase_last, this -> M_impl._end, erase_first);
+            } else {
+                mystl::copy(erase_last, this -> M_impl._end, erase_first);
+            }
+            mystl::destroy_a(new_end, this -> M_impl._end, get_T_allocator());
+            this -> M_impl._end = new_end;
+            return erase_first;
+        }
+
         // swap
         constexpr void swap(vector& other) noexcept {
             if (this == &other) return;
@@ -780,8 +812,6 @@ namespace mystl {
             }
             this -> M_impl._swap_data(other.M_impl);
         }
-
-
         
 
     private:

@@ -114,6 +114,65 @@ struct MoveAssignmentOnly {
     }
 };
 
+struct CopyOnly {
+    int value = 0;
+    CopyOnly() = default;
+    explicit CopyOnly(int n) : value(n) {}
+    CopyOnly(const CopyOnly&) = default;
+    CopyOnly(CopyOnly&&) = delete;
+    CopyOnly& operator=(const CopyOnly&) = default;
+    CopyOnly& operator=(CopyOnly&&) = delete;
+};
+
+static_assert(mystl::is_copy_assignable_v<CopyOnly>);
+static_assert(mystl::is_copy_assignable_v<int>);
+static_assert(!mystl::is_copy_assignable_v<const int>);
+static_assert(!mystl::is_copy_assignable_v<MoveOnly>);
+static_assert(!mystl::is_move_constructible_v<CopyOnly>);
+static_assert(mystl::is_move_constructible_v<MoveOnly>);
+static_assert(!mystl::is_move_constructible_v<void>);
+
+struct ThrowingMoveOnly {
+    static inline int live = 0;
+    static inline int moves_before_throw = -1;
+    int value;
+    explicit ThrowingMoveOnly(int n = 0) : value(n) { ++live; }
+    ThrowingMoveOnly(const ThrowingMoveOnly&) = delete;
+    ThrowingMoveOnly& operator=(const ThrowingMoveOnly&) = delete;
+    ThrowingMoveOnly(ThrowingMoveOnly&& other) : value(other.value) {
+        Tracked::tick(moves_before_throw);
+        other.value = -1;
+        ++live;
+    }
+    ThrowingMoveOnly& operator=(ThrowingMoveOnly&& other) {
+        Tracked::tick(moves_before_throw);
+        value = other.value; other.value = -1; return *this;
+    }
+    ~ThrowingMoveOnly() { CHECK(live > 0); --live; }
+};
+
+// Copies share the cursor, unlike a multipass iterator with an input category tag.
+template<class T>
+struct SinglePassIterator {
+    using iterator_category = mystl::input_iterator_tag;
+    using value_type = T;
+    using pointer = const T*;
+    using reference = const T&;
+    using difference_type = std::ptrdiff_t;
+    struct State { const T* current; const T* last; const T* throw_at = nullptr; };
+    State* state = nullptr;
+    reference operator*() const {
+        if (state->current == state->throw_at) throw std::runtime_error("input read");
+        return *state->current;
+    }
+    SinglePassIterator& operator++() { ++state->current; return *this; }
+    bool operator==(const SinglePassIterator& other) const {
+        const bool done = !state || state->current == state->last;
+        const bool other_done = !other.state || other.state->current == other.state->last;
+        return done || other_done ? done == other_done : state == other.state;
+    }
+};
+
 template<class T>
 struct LimitedAllocator : mystl::allocator<T> {
     template<class U> struct rebind { using other = LimitedAllocator<U>; };
@@ -303,6 +362,104 @@ void exception_tests() {
     CHECK(Tracked::live == 0 && allocations.empty());
 }
 
+void erase_tests() {
+    mystl::vector<int> empty;
+    CHECK(empty.erase(empty.begin(), empty.end()) == empty.end());
+    mystl::vector<int> v{1, 2, 3, 4, 5};
+    auto* old = v.data();
+    const auto cap = v.capacity();
+    CHECK(v.erase(v.begin() + 1) == v.begin() + 1);
+    CHECK(v.size() == 4 && v[1] == 3 && v[3] == 5);
+    CHECK(v.erase(v.end() - 1) == v.end());
+    CHECK(v.erase(v.begin() + 1, v.begin() + 1) == v.begin() + 1);
+    CHECK(v.erase(v.begin(), v.begin() + 2) == v.begin());
+    CHECK(v.size() == 1 && v[0] == 4 && v.data() == old && v.capacity() == cap);
+    CHECK(v.erase(v.begin(), v.end()) == v.end());
+    CHECK(v.empty() && v.data() == old && v.capacity() == cap);
+
+    mystl::vector<MoveOnly> m;
+    for (int i = 0; i < 5; ++i) m.emplace_back(i);
+    m.erase(m.begin() + 1, m.begin() + 3);
+    CHECK(m.size() == 3 && m[0].value == 0 && m[1].value == 3 && m[2].value == 4);
+    mystl::vector<CopyOnly> c(std::size_t(4));
+    for (int i = 0; i < 4; ++i) c[i].value = i;
+    c.erase(c.begin());
+    c.erase(c.begin(), c.begin() + 1);
+    CHECK(c.size() == 2 && c[0].value == 2 && c[1].value == 3);
+    c.reserve(8);
+    CopyOnly value(9);
+    c.insert(c.begin(), value);
+    c.insert(c.begin() + 1, std::size_t(2), value);
+    CHECK(c.size() == 5 && c[0].value == 9 && c[3].value == 2);
+
+    using A = OwnerAllocator<Tracked, false, false, false>;
+    {
+        mystl::vector<Tracked, A> tracked(std::size_t(5), A(1));
+        for (int i = 0; i < 5; ++i) tracked[i].value = i;
+        tracked.erase(tracked.begin() + 1, tracked.begin() + 3);
+        CHECK(Tracked::live == 3 && tracked[1].value == 3);
+        Tracked::assignments_before_throw = 0;
+        expect_throw([&] { tracked.erase(tracked.begin()); });
+        CHECK(tracked.size() == 3 && Tracked::live == 3);
+        expect_throw([&] { tracked.erase(tracked.begin(), tracked.begin() + 1); });
+        CHECK(tracked.size() == 3 && Tracked::live == 3);
+        Tracked::assignments_before_throw = -1;
+        tracked.erase(tracked.begin(), tracked.end());
+        CHECK(Tracked::live == 0);
+    }
+    CHECK(allocations.empty());
+}
+
+void input_and_failure_tests() {
+    using Input = SinglePassIterator<int>;
+    const int data[] = {1, 2, 3, 4};
+    Input::State state{data, data + 4};
+    mystl::vector<int> v(Input{&state}, Input{});
+    CHECK(v.size() == 4 && v[0] == 1 && v[3] == 4 && state.current == state.last);
+    state.current = data;
+    v.assign(Input{&state}, Input{});
+    CHECK(v.size() == 4 && v[3] == 4);
+    {
+        Tracked source[] = {Tracked(1), Tracked(2), Tracked(3)};
+        using It = SinglePassIterator<Tracked>;
+        It::State failing{source, source + 3, source + 2};
+        expect_throw([&] { mystl::vector<Tracked> doomed(It{&failing}, It{}); });
+        CHECK(Tracked::live == 3);
+        mystl::vector<Tracked> target;
+        failing.current = source;
+        expect_throw([&] { target.assign(It{&failing}, It{}); });
+        CHECK(target.size() == 2 && Tracked::live == 5);
+    }
+    CHECK(Tracked::live == 0);
+    using A = OwnerAllocator<ThrowingMoveOnly, false, false, false>;
+    {
+        mystl::vector<ThrowingMoveOnly, A> m(A(1));
+        m.emplace_back(1); m.emplace_back(2);
+        ThrowingMoveOnly::moves_before_throw = 1;
+        expect_throw([&] { m.emplace_back(3); });
+        // Values may have changed; every original object must remain alive and destructible.
+        CHECK(m.size() == 2 && ThrowingMoveOnly::live == 2 && allocations.size() == 1);
+        ThrowingMoveOnly::moves_before_throw = -1;
+        m.clear(); m.emplace_back(4);
+        CHECK(m[0].value == 4);
+    }
+    CHECK(ThrowingMoveOnly::live == 0 && allocations.empty());
+
+    using B = OwnerAllocator<Tracked, false, false, false>;
+    for (int fail_after = 0; fail_after < 4; ++fail_after) {
+        mystl::vector<Tracked, B> source(std::size_t(4), B(1));
+        Tracked::copies_before_throw = fail_after;
+        expect_throw([&] { mystl::vector<Tracked, B> copy(source); });
+        CHECK(Tracked::live == 4 && allocations.size() == 1);
+        auto* old = source.data();
+        Tracked::copies_before_throw = fail_after;
+        expect_throw([&] { source.reserve(10); });
+        CHECK(source.data() == old && source.size() == 4 && Tracked::live == 4);
+        Tracked::copies_before_throw = -1;
+    }
+    CHECK(Tracked::live == 0 && allocations.empty());
+}
+
 void capacity_limit_tests() {
     using V = mystl::vector<int, LimitedAllocator<int>>;
     V small({1, 2}, LimitedAllocator<int>(3));
@@ -328,12 +485,12 @@ void differential_tests() {
     mystl::vector<std::string> actual;
     std::vector<std::string> expected;
     unsigned random = 1234567;
-    for (int step = 0; step < 500; ++step) {
+    for (int step = 0; step < 3000; ++step) {
         random = random * 1664525u + 1013904223u;
         auto value = std::to_string(step);
         auto offset = expected.empty() ? 0 : random % (expected.size() + 1);
         auto pos = actual.empty() ? actual.begin() : actual.begin() + offset;
-        switch ((random >> 16) % 8) {
+        switch ((random >> 16) % 12) {
             case 0: actual.push_back(value); expected.push_back(value); break;
             case 1: actual.insert(pos, value); expected.insert(expected.begin() + offset, value); break;
             case 2: {
@@ -345,6 +502,30 @@ void differential_tests() {
             case 5: actual.reserve(random % 30); expected.reserve(random % 30); break;
             case 6: actual.shrink_to_fit(); expected.shrink_to_fit(); break;
             case 7: if (!expected.empty()) { actual.pop_back(); expected.pop_back(); } break;
+            case 8: if (!expected.empty()) {
+                auto index = offset % expected.size();
+                auto a = actual.erase(actual.begin() + index);
+                auto b = expected.erase(expected.begin() + index);
+                CHECK((a == actual.end()) == (b == expected.end()));
+                if (b != expected.end()) CHECK(*a == *b);
+            } break;
+            case 9: if (!expected.empty()) {
+                const auto last = offset + ((random >> 8) % (expected.size() - offset + 1));
+                auto a = actual.erase(actual.begin() + offset, actual.begin() + last);
+                auto b = expected.erase(expected.begin() + offset, expected.begin() + last);
+                CHECK((a == actual.end()) == (b == expected.end()));
+                if (b != expected.end()) CHECK(*a == *b);
+            } break;
+            case 10: {
+                mystl::vector<std::string> copy(actual);
+                actual = copy;
+                break;
+            }
+            case 11: if (!expected.empty()) {
+                const auto index = (random >> 8) % expected.size();
+                actual.insert(pos, actual[index]);
+                expected.insert(expected.begin() + offset, expected[index]);
+            } break;
         }
         CHECK(actual.size() == expected.size() && actual.size() <= actual.capacity());
         for (std::size_t i = 0; i < expected.size(); ++i) CHECK(actual[i] == expected[i]);
@@ -355,6 +536,8 @@ int main() {
     allocator_tests();
     iterator_and_insert_tests();
     exception_tests();
+    erase_tests();
+    input_and_failure_tests();
     capacity_limit_tests();
     differential_tests();
     CHECK(allocations.empty() && Tracked::live == 0);
