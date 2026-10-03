@@ -26,15 +26,18 @@ namespace mystl {
 
     // swap
     template <typename T>
-    void swap(T& lhs, T& rhs) noexcept(noexcept(move(lhs)) && noexcept(move(rhs))) {
-        T temp = move(lhs);
-        lhs = move(rhs);
-        rhs = move(temp);
+        requires is_move_constructible_v<T> && is_move_assignable_v<T>
+    constexpr void swap(T& lhs, T& rhs) 
+        noexcept(is_nothrow_move_constructible_v<T> && is_nothrow_move_assignable_v<T>) 
+    {
+        T temp(mystl::move(lhs));
+        lhs = mystl::move(rhs);
+        rhs = mystl::move(temp);
     };
     template <class T, size_t N>
-    void swap(T(&lhs)[N], T(&rhs)[N]) noexcept(noexcept(swap(*lhs, *rhs))) {
+    void swap(T(&lhs)[N], T(&rhs)[N]) noexcept(noexcept(mystl::swap(*lhs, *rhs))) {
         for (int i=0; i<N; i++) {
-            swap(lhs[i], rhs[i]);
+            mystl::swap(lhs[i], rhs[i]);
         }
     }
 

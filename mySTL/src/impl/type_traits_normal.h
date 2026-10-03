@@ -533,7 +533,7 @@ namespace mystl {
     template <typename T, typename = void>
     struct is_move_assignable : false_type {};
     template <typename T>
-    struct is_move_assignable<T, decltype(declval<T&>() = declval<T&&>())> : true_type {};
+    struct is_move_assignable<T, void_t<decltype(declval<T&>() = declval<T&&>())>> : true_type {};
     template <typename T>
     inline constexpr bool is_move_assignable_v = is_move_assignable<T>::value;
 

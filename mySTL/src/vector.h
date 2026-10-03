@@ -772,7 +772,7 @@ namespace mystl {
         constexpr void swap(vector& other) noexcept {
             if (this == &other) return;
             if constexpr (Allocator_traits::propagate_on_container_swap::value) {
-                using std::swap;
+                using mystl::swap;
                 swap(get_T_allocator(), other.get_T_allocator());
             }else {
                 // As with std::vector, non-propagating allocators must compare equal.
