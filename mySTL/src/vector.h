@@ -726,7 +726,7 @@ namespace mystl {
             if (count > max_size() - size()) {
                 THROW_LENGTH_ERROR_IF(true, "cannot create vector larger than max_size()");
             }
-            if (count < capacity() - size()) {
+            if (count <= capacity() - size()) {
                 value_type insert_obj(value);
 
                 pointer insert_pos = this -> M_impl._begin + n;
@@ -968,8 +968,8 @@ namespace mystl {
             range_assign(first, last, n);
         }
 
-        template <typename Input_Iterator>
-        constexpr void range_assign(Input_Iterator first, Input_Iterator last, size_type n) {
+        template <typename Forward_Iterator>
+        constexpr void range_assign(Forward_Iterator first, Forward_Iterator last, size_type n) {
             if (n > capacity()) {
                 vector tmp(first, last, get_T_allocator());
                 this -> M_impl._swap_data(tmp.M_impl);
@@ -998,8 +998,8 @@ namespace mystl {
             range_move_assign(first, last, n);
         }
 
-        template <typename Input_Iterator>
-        constexpr void range_move_assign(Input_Iterator first, Input_Iterator last, size_type n) {
+        template <typename Forward_Iterator>
+        constexpr void range_move_assign(Forward_Iterator first, Forward_Iterator last, size_type n) {
             if (n > capacity()) {
                 Guard_alloc storage(this -> M_allocate(n), n, *this);
                 mystl::uninitialized_move_a(first, last, storage._storage, get_T_allocator());
