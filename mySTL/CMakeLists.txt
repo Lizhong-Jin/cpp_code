@@ -45,10 +45,11 @@ if(BUILD_TESTING)
     add_executable(mystl_algorithm_regression test/algorithm_regression.cpp)
     add_test(NAME mystl_algorithm_regression COMMAND mystl_algorithm_regression)
 
+    add_executable(mystl_vector_regression test/vector_regression.cpp)
+    add_test(NAME mystl_vector_regression COMMAND mystl_vector_regression)
+
     # Compile each header in a separate translation unit so include order cannot hide dependencies.
-    # vector remains under development and is intentionally excluded from this check.
     file(GLOB_RECURSE MYSTL_HEADERS CONFIGURE_DEPENDS RELATIVE "${CMAKE_CURRENT_SOURCE_DIR}" "src/*.h")
-    list(REMOVE_ITEM MYSTL_HEADERS "src/vector.h")
     set(MYSTL_HEADER_CHECK_SOURCES)
     foreach(header IN LISTS MYSTL_HEADERS)
         string(MAKE_C_IDENTIFIER "${header}" header_id)
@@ -61,7 +62,7 @@ if(BUILD_TESTING)
 
     option(MYSTL_ENABLE_SANITIZERS "Enable address and undefined behavior sanitizers for tests" OFF)
     if(MYSTL_ENABLE_SANITIZERS AND CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
-        foreach(target mystl_regression mystl_algorithm_regression)
+        foreach(target mystl_regression mystl_algorithm_regression mystl_vector_regression)
             target_compile_options(${target} PRIVATE -fsanitize=address,undefined -fno-omit-frame-pointer)
             target_link_options(${target} PRIVATE -fsanitize=address,undefined)
         endforeach()

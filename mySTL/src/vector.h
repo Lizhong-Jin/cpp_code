@@ -5,6 +5,7 @@
 
 #include <limits>
 #include <cassert>
+#include <utility>
 
 #include "iterator.h"
 #include "memory.h"
@@ -12,8 +13,6 @@
 #include "stdexcept.h"
 #include "algorithm.h"
 #include "initializer_list.h"
-#include "impl/basic_string.h"
-#include "impl/basic_string.h"
 
 namespace mystl {
 #define MYSTL_DEBUG(expr) assert(expr)
@@ -201,15 +200,13 @@ namespace mystl {
             fill_initialized(n, value);
         }
 
-        constexpr vector(const vector& other) : Base(other.size(), other.get_T_allocator()) {
-            this -> M_impl._end = mystl::uninitialized_copy_a(other.begin(), other.end(),
-                                                                this->M_impl._begin, get_T_allocator());
-        }
+        constexpr vector(const vector& other)
+            : vector(other, Allocator_traits::select_on_container_copy_construction(other.get_T_allocator())) {}
 
         constexpr vector(vector&& other) noexcept = default;
 
         constexpr vector(const vector& other, const type_identity_t<allocator_type>& alloc)
-            : Base(other.size(), alloc) {
+            : Base(check_init_len(other.size(), alloc), alloc) {
             this -> M_impl._end = mystl::uninitialized_copy_a(other.begin(), other.end(),
                                                                 this->M_impl._begin, get_T_allocator());
         }
@@ -222,7 +219,7 @@ namespace mystl {
             if (other.get_allocator() == alloc) {
                 this -> M_impl._swap_data(other.M_impl);
             }else {
-                this -> M_create_storage(other.size());
+                this -> M_create_storage(check_init_len(other.size(), get_T_allocator()));
                 this -> M_impl._end = mystl::uninitialized_move_a(other.begin(), other.end(),
                                                                 this -> M_impl._begin, get_T_allocator() );
                 other.clear();
@@ -231,8 +228,7 @@ namespace mystl {
 
     public:
         constexpr vector(vector&& other, const type_identity_t<allocator_type>& alloc)
-        noexcept(noexcept(vector(declval<vector&&>(), declval<const allocator_type&>(),
-            Allocator_traits::is_always_equal::value)))
+        noexcept(Allocator_traits::is_always_equal::value)
             : vector(mystl::move(other), alloc, typename Allocator_traits::is_always_equal{}) {}
 
         constexpr vector(initializer_list<value_type> list, const allocator_type& alloc = allocator_type()) : Base(alloc) {
@@ -270,10 +266,12 @@ namespace mystl {
         
         constexpr vector& operator=(const vector& other) {
             if (this != &other) {
-                if (Allocator_traits::propagate_on_container_copy_assignment::value && get_T_allocator() != other.get_T_allocator()) {
-                    clear();
-                    this -> M_deallocate(this -> M_impl._begin, this -> capacity());
-                    this -> M_impl._begin = this -> M_impl._end = this -> M_impl._end_of_storage = pointer();
+                if constexpr (Allocator_traits::propagate_on_container_copy_assignment::value) {
+                    if (get_T_allocator() != other.get_T_allocator()) {
+                        release_storage();
+                    }
+                    // Propagation is required even when the allocators compare equal.
+                    get_T_allocator() = other.get_T_allocator();
                 }
                 assign(other.begin(), other.end());
             }
@@ -284,7 +282,9 @@ namespace mystl {
         noexcept(Allocator_traits::propagate_on_container_move_assignment::value ||
             Allocator_traits::is_always_equal::value) 
         {
-            move_assign(mystl::move(other), typename Allocator_traits::propagate_on_container_move_assignment{});
+            if (this != &other) {
+                move_assign(mystl::move(other), typename Allocator_traits::propagate_on_container_move_assignment{});
+            }
             return *this;
         }
 
@@ -631,7 +631,7 @@ namespace mystl {
                     Allocator_traits::construct(get_T_allocator(), this -> M_impl._end, *(this -> M_impl._end - 1));
                 }
                 ++this -> M_impl._end;
-                if constexpr (is_nothrow_move_constructible_v<value_type> || !is_copy_constructible_v<value_type>) {
+                if constexpr (is_nothrow_move_assignable_v<value_type> || !is_copy_assignable_v<value_type>) {
                     mystl::move_backward(insert_pos, this -> M_impl._end - 2, this -> M_impl._end - 1);
                 } else {
                     mystl::copy_backward(insert_pos, this -> M_impl._end - 2, this -> M_impl._end - 1);
@@ -667,7 +667,7 @@ namespace mystl {
                     Allocator_traits::construct(get_T_allocator(), this -> M_impl._end, *(this -> M_impl._end - 1));
                 }
                 ++this -> M_impl._end;
-                if constexpr (is_nothrow_move_constructible_v<value_type> || !is_copy_constructible_v<value_type>) {
+                if constexpr (is_nothrow_move_assignable_v<value_type> || !is_copy_assignable_v<value_type>) {
                     mystl::move_backward(insert_pos, this -> M_impl._end - 2, this -> M_impl._end - 1);
                 } else {
                     mystl::copy_backward(insert_pos, this -> M_impl._end - 2, this -> M_impl._end - 1);
@@ -702,7 +702,7 @@ namespace mystl {
                     Allocator_traits::construct(get_T_allocator(), this -> M_impl._end, *(this -> M_impl._end - 1));
                 }
                 ++this -> M_impl._end;
-                if constexpr (is_nothrow_move_constructible_v<value_type> || !is_copy_constructible_v<value_type>){
+                if constexpr (is_nothrow_move_assignable_v<value_type> || !is_copy_assignable_v<value_type>){
                     mystl::move_backward(insert_pos, this -> M_impl._end - 2, this -> M_impl._end - 1);
                 } else {
                     mystl::copy_backward(insert_pos, this -> M_impl._end - 2, this -> M_impl._end - 1);
@@ -736,27 +736,30 @@ namespace mystl {
                     if constexpr (is_nothrow_move_constructible_v<value_type> || !is_copy_constructible_v<value_type>) {
                         mystl::uninitialized_move_a(this -> M_impl._end - count, this -> M_impl._end,
                                                 this -> M_impl._end, get_T_allocator());
-                        this -> M_impl._end += count;
-                        mystl::move_backward(insert_pos, old_end - count, old_end);
                     }else {
                         mystl::uninitialized_copy_a(this -> M_impl._end - count, this -> M_impl._end,
                                                 this -> M_impl._end, get_T_allocator());
-                        this -> M_impl._end += count;
+                    }
+                    this -> M_impl._end += count;
+                    if constexpr (is_nothrow_move_assignable_v<value_type> || !is_copy_assignable_v<value_type>) {
+                        mystl::move_backward(insert_pos, old_end - count, old_end);
+                    } else {
                         mystl::copy_backward(insert_pos, old_end - count, old_end);
                     }
                     mystl::fill_n(insert_pos, count, insert_obj);
-                    Allocator_traits::destroy(get_T_allocator(), insert_obj);
                 }else {
-                    mystl::uninitialized_fill_n_a(this -> M_impl._end, count - after_elems, insert_obj, get_T_allocator());
-                    this -> M_impl._end += count - after_elems;
+                    Guard_objects appended(get_T_allocator(), old_end);
+                    pointer extra_end = mystl::uninitialized_fill_n_a(old_end, count - after_elems, insert_obj, get_T_allocator());
+                    appended.set_end(extra_end);
+                    pointer new_end;
                     if constexpr (is_nothrow_move_constructible_v<value_type> || !is_copy_constructible_v<value_type>) {
-                        mystl::uninitialized_move_a(insert_pos, this -> M_impl._end - (count - after_elems),
-                                                this -> M_impl._end, get_T_allocator());
+                        new_end = mystl::uninitialized_move_a(insert_pos, old_end, extra_end, get_T_allocator());
                     }else{
-                        mystl::uninitialized_copy_a(insert_pos, this -> M_impl._end - (count - after_elems),
-                                                this -> M_impl._end, get_T_allocator());
+                        new_end = mystl::uninitialized_copy_a(insert_pos, old_end, extra_end, get_T_allocator());
                     }
-                    this -> M_impl._end += after_elems;
+                    appended.set_end(new_end);
+                    this -> M_impl._end = new_end;
+                    appended.release();
                     mystl::fill_n(insert_pos, after_elems, insert_obj);
                 }
                 return insert_pos;
@@ -767,17 +770,15 @@ namespace mystl {
 
         // swap
         constexpr void swap(vector& other) noexcept {
+            if (this == &other) return;
             if constexpr (Allocator_traits::propagate_on_container_swap::value) {
-                this -> M_impl._swap_data(other.M_impl);
+                using std::swap;
+                swap(get_T_allocator(), other.get_T_allocator());
             }else {
-                if (get_T_allocator() == other.get_T_allocator()) {
-                    this -> M_impl._swap_data(other.M_impl);
-                }else {
-                    vector_base<T, Allocator> temp(mystl::move(other));
-                    other.M_impl._swap_data(this -> M_impl);
-                    this -> M_impl._swap_data(temp.M_impl);
-                }
+                // As with std::vector, non-propagating allocators must compare equal.
+                MYSTL_DEBUG(get_T_allocator() == other.get_T_allocator());
             }
+            this -> M_impl._swap_data(other.M_impl);
         }
 
 
@@ -886,7 +887,7 @@ namespace mystl {
         constexpr void range_initialized_n(Iterator first, Iterator last, size_type n) {
             this -> M_impl._begin = this -> M_allocate(check_init_len(n, get_T_allocator()));
             this -> M_impl._end_of_storage = this -> M_impl._begin + n;
-            this -> M_impl._end = uninitialized_copy_a(mystl::move(first),
+            this -> M_impl._end = mystl::uninitialized_copy_a(mystl::move(first),
                                         last, this -> M_impl._begin, get_T_allocator());
         }
 
@@ -905,7 +906,7 @@ namespace mystl {
 
         template <typename Forward_Iterator>
         constexpr void range_initialized(Forward_Iterator first, Forward_Iterator last, forward_iterator_tag) {
-            range_initialized_n(first, last, distance(first, last));
+            range_initialized_n(first, last, mystl::distance(first, last));
         }
 
     private:
@@ -970,11 +971,16 @@ namespace mystl {
 
         template <typename Forward_Iterator>
         constexpr void range_assign(Forward_Iterator first, Forward_Iterator last, size_type n) {
+            if (n == 0) {
+                clear();
+                return;
+            }
             if (n > capacity()) {
                 vector tmp(first, last, get_T_allocator());
                 this -> M_impl._swap_data(tmp.M_impl);
             }else if (n > size()) {
-                auto mid = first + size();
+                auto mid = first;
+                mystl::advance(mid, size());
                 mystl::copy(first, mid, this -> M_impl._begin);
                 this -> M_impl._end = mystl::uninitialized_copy_a(mid, last, this -> M_impl._end, get_T_allocator());
             }else {
@@ -1000,18 +1006,24 @@ namespace mystl {
 
         template <typename Forward_Iterator>
         constexpr void range_move_assign(Forward_Iterator first, Forward_Iterator last, size_type n) {
+            check_init_len(n, get_T_allocator());
+            if (n == 0) {
+                clear();
+                return;
+            }
             if (n > capacity()) {
                 Guard_alloc storage(this -> M_allocate(n), n, *this);
                 mystl::uninitialized_move_a(first, last, storage._storage, get_T_allocator());
 
                 mystl::destroy_a(this -> M_impl._begin, this -> M_impl._end, get_T_allocator());
-                this -> M_deallocate(this -> M_impl._begin, this -> M_impl._end_of_storage - this -> M_impl._begin);
+                this -> M_deallocate(this -> M_impl._begin, capacity());
 
                 this -> M_impl._begin = storage.release();
                 this -> M_impl._end = this -> M_impl._begin + n;
                 this -> M_impl._end_of_storage = this -> M_impl._begin + n;
             }else if (n > size()) {
-                auto mid = first + size();
+                auto mid = first;
+                mystl::advance(mid, size());
                 mystl::move(first, mid, this -> M_impl._begin);
                 this -> M_impl._end = mystl::uninitialized_move_a(mid, last, this -> M_impl._end, get_T_allocator());
             }else {
@@ -1021,25 +1033,26 @@ namespace mystl {
             }
         }
 
-        constexpr void move_assign(vector&& other, true_type) {
+        constexpr void release_storage() noexcept {
+            const size_type old_cap = capacity();
             clear();
-            if (get_T_allocator() != other.get_T_allocator()) {
-                this -> M_deallocate(this -> M_impl._begin, this -> capacity());
-                this -> M_impl._begin = this -> M_impl._end = this -> M_impl._end_of_storage = pointer();
-            }
+            M_deallocate(this -> M_impl._begin, old_cap);
+            this -> M_impl._begin = this -> M_impl._end = this -> M_impl._end_of_storage = pointer();
+        }
+
+        constexpr void move_assign(vector&& other, true_type) {
+            release_storage();
+            get_T_allocator() = mystl::move(other.get_T_allocator());
             this -> M_impl._swap_data(other.M_impl);
         }
 
         constexpr void move_assign(vector&& other, false_type) {
-            clear();
             if (get_T_allocator() == other.get_T_allocator()) {
+                release_storage();
                 this -> M_impl._swap_data(other.M_impl);
             }else {
-                if constexpr (is_nothrow_move_constructible_v<value_type> || !is_copy_constructible_v<value_type>) {
-                    range_move_assign(other.begin(), other.end(), typename iterator_traits<iterator>::iterator_category{});
-                }else {
-                    assign(other.begin(), other.end());
-                }
+                range_move_assign(other.begin(), other.end(), other.size());
+                other.clear();
             }
         }
 

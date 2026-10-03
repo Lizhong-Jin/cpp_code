@@ -69,15 +69,6 @@ namespace mystl {
 
         static constexpr void destroy(T* first, T* last) {mystl::destroy(first, last);}
 
-        template <typename U>
-        constexpr bool operator==(const allocator<U>&) noexcept {
-            return true;
-        }
-
-        template <typename U>
-        constexpr bool operator!=(const allocator<U>&) noexcept {
-            return false;
-        }
     };
 
     template <typename T1, typename T2>
@@ -197,6 +188,14 @@ namespace mystl {
                 return alloc.max_size();
             }else {
                 return static_cast<size_type>(-1) / sizeof(value_type);
+            }
+        }
+
+        static constexpr Alloc select_on_container_copy_construction(const Alloc& alloc) {
+            if constexpr (requires { alloc.select_on_container_copy_construction(); }) {
+                return alloc.select_on_container_copy_construction();
+            } else {
+                return alloc;
             }
         }
     };
