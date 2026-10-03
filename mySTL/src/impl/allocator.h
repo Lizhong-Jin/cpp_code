@@ -69,13 +69,13 @@ namespace mystl {
 
         static constexpr void destroy(T* first, T* last) {mystl::destroy(first, last);}
 
-        template <typename T>
-        constexpr bool operator==(const allocator<T>&) noexcept {
+        template <typename U>
+        constexpr bool operator==(const allocator<U>&) noexcept {
             return true;
         }
 
-        template <typename T>
-        constexpr bool operator!=(const allocator<T>&) noexcept {
+        template <typename U>
+        constexpr bool operator!=(const allocator<U>&) noexcept {
             return false;
         }
     };
