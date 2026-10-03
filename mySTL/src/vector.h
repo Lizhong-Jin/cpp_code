@@ -183,6 +183,15 @@ namespace mystl {
         using Base::M_deallocate;
         using Base::get_T_allocator;
 
+        private:
+#if defined(__clang__) || defined(__GNUC__)
+    [[gnu::noinline]]
+#endif
+    [[noreturn]] static void throw_growth_length_error() {
+        throw mystl::length_error(
+            "cannot create vector larger than max_size()");
+    }
+
     public:
         // *************************************************************************************
         // construct
@@ -488,6 +497,7 @@ namespace mystl {
             }
         };
 
+
     public:
         // *************************************************************************************
         // modifiers of vector
@@ -502,7 +512,7 @@ namespace mystl {
 
             const auto old_cap = capacity();
             if (old_cap == max_size()) {
-                THROW_LENGTH_ERROR_IF(true, "cannot create vector larger than max_size()");
+                throw_growth_length_error();
             }
             const size_type new_cap = old_cap == 0 ? 1 : (max_size() / 2 < old_cap ? max_size() : old_cap * 2);
             
@@ -559,7 +569,7 @@ namespace mystl {
         // resize, change the size of vector, if new size > old size, then fill the new element with value
         constexpr void resize(size_type new_size) {
             if (new_size > max_size()) {
-                THROW_LENGTH_ERROR_IF(true, "cannot create vector larger than max_size()");
+                throw_growth_length_error();
             }
             if (new_size <= size()) {
                 auto new_end = this -> M_impl._begin + new_size;
@@ -724,7 +734,7 @@ namespace mystl {
             const size_type n = pos - cbegin();
             if (count == 0) return this -> M_impl._begin + n;
             if (count > max_size() - size()) {
-                THROW_LENGTH_ERROR_IF(true, "cannot create vector larger than max_size()");
+                throw_growth_length_error();
             }
             if (count <= capacity() - size()) {
                 value_type insert_obj(value);
@@ -812,14 +822,14 @@ namespace mystl {
             }
             this -> M_impl._swap_data(other.M_impl);
         }
-        
+
 
     private:
         // reallocate a new space and copy the data to there, sizeof(new space) = 2 * sizeof(old space)
         constexpr pointer reallocate() {
             const auto old_cap = static_cast<size_type>(this->M_impl._end_of_storage - this->M_impl._begin);
             if (old_cap == max_size()) {
-                THROW_LENGTH_ERROR_IF(true, "cannot create vector larger than max_size()");
+                throw_growth_length_error();
             }
             const size_type new_cap = old_cap == 0 ? 1 : (max_size() / 2 < old_cap ? max_size() : old_cap * 2);
             return reallocate(new_cap);
@@ -844,7 +854,7 @@ namespace mystl {
         constexpr pointer reallocate_and_insert(const size_type n, const size_type count, Args&&... args) {
             if(count == 0) return this -> M_impl._begin + n;
             if (count > max_size() - size()) {
-                THROW_LENGTH_ERROR_IF(true, "cannot create vector larger than max_size()");
+                throw_growth_length_error();
             }
             const size_type old_size = size();
             const size_type old_cap = capacity();

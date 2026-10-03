@@ -1,11 +1,15 @@
 # Temporarily excluded source copy
 /mySTL_code/
 
+# Local-only notes
+/mySTL/README.md
+
 # macOS and editor settings
 .DS_Store
 ._*
 .idea/
 .vscode/
+.cache/
 *.swp
 *.swo
 *~
@@ -13,12 +17,21 @@
 # Build directories and CMake-generated files
 cmake-build-*/
 build/
+build-*/
+build_*/
+out/
+.cmake/
 CMakeFiles/
 CMakeCache.txt
+CMakeUserPresets.json
 cmake_install.cmake
 CTestTestfile.cmake
+DartConfiguration.tcl
+Testing/
+install_manifest.txt
 compile_commands.json
 build.ninja
+rules.ninja
 .ninja_deps
 .ninja_log
 
@@ -27,6 +40,7 @@ build.ninja
 *.obj
 *.a
 *.so
+*.so.*
 *.dylib
 *.dll
 *.lib
@@ -36,6 +50,7 @@ build.ninja
 *.pdb
 *.gcda
 *.gcno
+*.gcov
 *.profraw
 *.profdata
 
@@ -46,7 +61,9 @@ build.ninja
 /test/assist
 /test/test
 /txt_read/test
-/mySTL/README.md
+
+# Generated benchmark reports (keep other CSV data trackable)
+vector-benchmark.csv
 
 # Generated images
 /simple graphic/Image_save/
