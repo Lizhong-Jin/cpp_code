@@ -213,6 +213,16 @@ namespace mystl {
         }
     }
 
+    template<typename T, typename Alloc, typename = void>
+    struct uses_allocator : false_type {};
+
+    template<typename T, typename Alloc>
+    struct uses_allocator<T, Alloc, void_t<typename T::allocator_type>>
+        : bool_constant< is_convertible_v<Alloc, typename T::allocator_type>> {};
+
+    template<typename T, typename Alloc>
+    inline constexpr bool uses_allocator_v = uses_allocator<T, Alloc>::value;
+
 } // namespace mystl
 
 #endif //ALLOCATOR_H

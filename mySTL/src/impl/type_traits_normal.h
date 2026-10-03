@@ -580,17 +580,19 @@ namespace mystl {
     inline constexpr bool is_nothrow_destructible_v = is_nothrow_destructible<T>::value;
 
     // is_convertible
-    template <typename, typename, typename = void>
-    struct is_convertible : false_type {};
-    template <typename From, typename To>
-    struct is_convertible<From, To, decltype(void(static_cast<To>(declval<From>())))> : true_type {};
-    template <typename From, typename To>
+    template<typename From, typename To>
+    struct is_convertible : bool_constant<__is_convertible(From, To)> {};
+    template<typename From, typename To>
     inline constexpr bool is_convertible_v = is_convertible<From, To>::value;
 
     // is_nothrow_convertible
+    template <typename From, typename To, bool = is_convertible_v<From, To>>
+    struct is_nothrow_convertible_impl : false_type {};
     template <typename From, typename To>
-    struct is_nothrow_convertible : bool_constant<is_convertible_v<From, To>
-                                                && noexcept(static_cast<To>(declval<From>()))> {};
+    struct is_nothrow_convertible_impl<From, To, true> : bool_constant<noexcept(static_cast<To>(declval<From>()))> {};
+
+    template <typename From, typename To>
+    struct is_nothrow_convertible : is_nothrow_convertible_impl<From, To> {};
     template <typename From, typename To>
     inline constexpr bool is_nothrow_convertible_v = is_nothrow_convertible<From, To>::value;
 

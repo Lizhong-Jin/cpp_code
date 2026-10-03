@@ -5,6 +5,7 @@
 
 #include "../functional.h"
 #include "../iterator.h"
+#include "type_traits_normal.h"
 
 namespace mystl {
     // **********************************************************************************
@@ -50,7 +51,7 @@ namespace mystl {
     // push_heap
     namespace detail {
         template <class Random_Iterator, class Compare>
-        constexpr void _push_heap(Random_Iterator first, Random_Iterator last, const Compare& comp) {
+        constexpr void _push_heap(Random_Iterator first, Random_Iterator last, Compare& comp) {
             using diff_type = iter_difference_type<Random_Iterator>;
             const diff_type n = last - first;
             if (n <= 1) return;
@@ -59,7 +60,11 @@ namespace mystl {
             while (child > 0) {
                 diff_type parent = (child - 1) >> 1;
                 if (!comp(*(first + parent), value)) break;
-                *(first + child) = *(first + parent);
+                if constexpr (is_move_assignable_v<iter_value_type<Random_Iterator>>) {
+                    *(first + child) = mystl::move(*(first + parent));
+                } else {
+                    *(first + child) = *(first + parent);
+                }
                 child = parent;
             }
             *(first + child) = mystl::move(value);
@@ -73,14 +78,14 @@ namespace mystl {
 
     template <class Random_Iterator>
     constexpr void push_heap(Random_Iterator first, Random_Iterator last) {
-        detail::_push_heap(first, last, mystl::less<>{});
+        mystl::push_heap(first, last, mystl::less<>{});
     }
 
     // **********************************************************************************
     // pop_heap
     namespace detail {
         template <class Random_Iterator, class Compare>
-        constexpr void _pop_heap(Random_Iterator first, Random_Iterator last, const Compare& comp) {
+        constexpr void _pop_heap(Random_Iterator first, Random_Iterator last, Compare& comp) {
             using diff_type = iter_difference_type<Random_Iterator>;
             const diff_type n = last - first - 1;
             if (n <= 0) return;
@@ -93,7 +98,11 @@ namespace mystl {
                 r_idx = l_idx + 1;
                 next_node_idx = r_idx < n ? (comp(*(first + l_idx), *(first + r_idx)) ? r_idx : l_idx) : l_idx;
                 if (!comp(value, *(first + next_node_idx))) break;
-                *(first + i) = *(first + next_node_idx);
+                if constexpr (is_move_assignable_v<iter_value_type<Random_Iterator>>) {
+                    *(first + i) = mystl::move(*(first + next_node_idx));
+                } else {
+                    *(first + i) = *(first + next_node_idx);
+                }
                 i = next_node_idx;
             }
             *(first + i) = mystl::move(value);
@@ -107,14 +116,14 @@ namespace mystl {
 
     template <class Random_Iterator>
     constexpr void pop_heap(Random_Iterator first, Random_Iterator last) {
-        detail::_pop_heap(first, last, mystl::less<>{});
+        mystl::pop_heap(first, last, mystl::less<>{});
     }
 
     // **********************************************************************************
     // make_heap
     namespace detail {
         template <class Random_Iterator, class Compare>
-        constexpr void _make_heap(Random_Iterator first, Random_Iterator last, const Compare& comp) {
+        constexpr void _make_heap(Random_Iterator first, Random_Iterator last, Compare& comp) {
             using diff_type = iter_difference_type<Random_Iterator>;
             const diff_type n = last - first;
             if (n <= 1) return;
@@ -128,7 +137,11 @@ namespace mystl {
                     r_sub = l_sub + 1;
                     next_node = r_sub < n ? (comp(*(first + l_sub), *(first + r_sub)) ? r_sub : l_sub) : l_sub;
                     if (!comp(value, *(first + next_node))) break;
-                    *(first + parent) = *(first + next_node);
+                    if constexpr (is_move_assignable_v<iter_value_type<Random_Iterator>>) {
+                        *(first + parent) = mystl::move(*(first + next_node));
+                    } else {
+                        *(first + parent) = *(first + next_node);
+                    }
                     parent = next_node;
                 }
                 *(first + parent) = mystl::move(value);
@@ -142,7 +155,7 @@ namespace mystl {
 
     template <class Random_Iterator>
     constexpr void make_heap(Random_Iterator first, Random_Iterator last) {
-        detail::_make_heap(first, last, mystl::less<>{});
+        mystl::make_heap(first, last, mystl::less<>{});
     }
 
     // **********************************************************************************

@@ -5,7 +5,6 @@
 
 #include <limits>
 #include <cassert>
-#include <utility>
 
 #include "iterator.h"
 #include "memory.h"
@@ -245,7 +244,7 @@ namespace mystl {
         }
 
         template <typename Input_Iterator>
-        requires mystl::is_input_iterator_v<Input_Iterator>
+            requires mystl::is_input_iterator_v<Input_Iterator>
         constexpr vector(Input_Iterator first, Input_Iterator last, const allocator_type& alloc = allocator_type())
             : Base(alloc) {
             range_initialized(first, last, iter_category<Input_Iterator>{});
@@ -778,6 +777,82 @@ namespace mystl {
             }
         }
 
+    private:
+        template <typename Input_Iterator>
+            requires mystl::is_input_iterator_v<Input_Iterator>
+        constexpr iterator range_insert(const_iterator pos, Input_Iterator first, Input_Iterator last, forward_iterator_tag) {
+            MYSTL_DEBUG(pos >= begin() && pos <= end());
+            const size_type n = pos - cbegin();
+            if (first == last) return this -> M_impl._begin + n;
+
+            const size_type count = mystl::distance(first, last);
+            if (count > max_size() - size()) {
+                throw_growth_length_error();
+            }
+            if (count <= capacity() - size()) {
+                pointer insert_pos = this -> M_impl._begin + n;
+                pointer old_end = this -> M_impl._end;
+                const size_type after_elems = this -> M_impl._end - insert_pos;
+                if (after_elems > count) {
+                    if constexpr (is_nothrow_move_constructible_v<value_type> || !is_copy_constructible_v<value_type>) {
+                        mystl::uninitialized_move_a(this -> M_impl._end - count, this -> M_impl._end,
+                                                this -> M_impl._end, get_T_allocator());
+                    }else {
+                        mystl::uninitialized_copy_a(this -> M_impl._end - count, this -> M_impl._end,
+                                                this -> M_impl._end, get_T_allocator());
+                    }
+                    this -> M_impl._end += count;
+                    if constexpr (is_nothrow_move_assignable_v<value_type> || !is_copy_assignable_v<value_type>) {
+                        mystl::move_backward(insert_pos, old_end - count, old_end);
+                    } else {
+                        mystl::copy_backward(insert_pos, old_end - count, old_end);
+                    }
+                    mystl::copy(first, last, insert_pos);
+                }else {
+                    Guard_objects appended(get_T_allocator(), old_end);
+                    auto mid = first;
+                    mystl::advance(mid, after_elems);
+                    pointer extra_end = mystl::uninitialized_copy_a(mid, last, old_end, get_T_allocator());
+                    appended.set_end(extra_end);
+                    pointer new_end;
+                    if constexpr (is_nothrow_move_constructible_v<value_type> || !is_copy_constructible_v<value_type>) {
+                        new_end = mystl::uninitialized_move_a(insert_pos, old_end, extra_end, get_T_allocator());
+                    }else{
+                        new_end = mystl::uninitialized_copy_a(insert_pos, old_end, extra_end, get_T_allocator());
+                    }
+                    appended.set_end(new_end);
+                    this -> M_impl._end = new_end;
+                    appended.release();
+                    mystl::copy(first, mid, insert_pos);
+                }
+                return insert_pos;
+            }else {
+                return range_reallocate_and_insert(n, first, last);
+            }
+        }
+
+        template <typename Input_Iterator>
+            requires mystl::is_input_iterator_v<Input_Iterator>
+        constexpr iterator range_insert(const_iterator pos, Input_Iterator first, Input_Iterator last, input_iterator_tag) {
+            MYSTL_DEBUG(pos >= begin() && pos <= end());
+            const size_type n = pos - cbegin();
+            if (first == last) return this -> M_impl._begin + n;
+
+            vector temp(first, last, get_T_allocator());
+            return range_insert(pos, temp.begin(), temp.end(), forward_iterator_tag{});
+        }     
+
+    public:
+        template <typename Input_Iterator>
+            requires mystl::is_input_iterator_v<Input_Iterator>
+        constexpr iterator insert(const_iterator pos, Input_Iterator first, Input_Iterator last){
+            return range_insert(pos, first, last, iter_category<Input_Iterator>{});
+        }
+
+        constexpr iterator insert(const_iterator pos, initializer_list<value_type> list) {
+            return insert(pos, list.begin(), list.end());
+        }
+
         // erase, erase the element at position pos
         constexpr iterator erase(const_iterator pos) {
             MYSTL_DEBUG(pos >= begin() && pos < end());
@@ -898,6 +973,57 @@ namespace mystl {
             suffix.release();
             storage.release();
             
+            return new_insert_pos;
+        }
+
+        template <typename Input_Iterator>
+            requires mystl::is_input_iterator_v<Input_Iterator>
+        constexpr pointer range_reallocate_and_insert(const size_type n, Input_Iterator first, Input_Iterator last) {
+            const size_type count = mystl::distance(first, last);
+            if (count == 0) return this -> M_impl._begin + n;
+            if (count > max_size() - size()) {
+                throw_growth_length_error();
+            }
+            const size_type old_size = size();
+            const size_type old_cap = capacity();
+            const size_type new_cap = min(max_size(), max(old_cap * 2, old_size + count));
+            auto& alloc = get_T_allocator();
+
+            Guard_alloc storage(this -> M_allocate(new_cap), new_cap, *this);
+            pointer new_begin = storage._storage;
+            pointer new_insert_pos = storage._storage + n;
+
+            Guard_objects prefix(alloc, new_begin);
+            Guard_objects new_constructed(alloc, new_insert_pos);
+            Guard_objects suffix(alloc, new_insert_pos + count);
+
+            mystl::uninitialized_copy_a(first, last, new_insert_pos, alloc);
+            new_constructed.set_end(new_insert_pos + count);
+
+            pointer prefix_end;
+            pointer suffix_end;
+            if constexpr (is_nothrow_move_constructible_v<value_type> || !is_copy_constructible_v<value_type>) {
+                prefix_end = mystl::uninitialized_move_a(this -> M_impl._begin, this -> M_impl._begin + n, new_begin, alloc);
+                prefix.set_end(prefix_end);
+                suffix_end = mystl::uninitialized_move_a(this -> M_impl._begin + n, this -> M_impl._end, new_insert_pos + count, alloc);
+            }else {
+                prefix_end = mystl::uninitialized_copy_a(this -> M_impl._begin, this -> M_impl._begin + n, new_begin, alloc);
+                prefix.set_end(prefix_end);
+                suffix_end = mystl::uninitialized_copy_a(this -> M_impl._begin + n, this -> M_impl._end, new_insert_pos + count, alloc);
+            }
+            suffix.set_end(suffix_end);
+
+            mystl::destroy_a(this -> M_impl._begin, this -> M_impl._end, alloc);
+            M_deallocate(this -> M_impl._begin, old_cap);
+
+            this -> M_impl._begin = new_begin;
+            this -> M_impl._end = suffix_end;
+            this -> M_impl._end_of_storage = new_begin + new_cap;
+
+            prefix.release();
+            new_constructed.release();
+            suffix.release();
+            storage.release();
             return new_insert_pos;
         }
 
@@ -1097,6 +1223,18 @@ namespace mystl {
         }
 
     }; // struct vector
+
+    template <typename T, typename Alloc>
+    constexpr void swap(vector<T, Alloc>& lhs, vector<T, Alloc>& rhs) 
+        noexcept(noexcept(lhs.swap(rhs))) 
+    {
+        lhs.swap(rhs);
+    }
+
+    template <typename T, typename Alloc>
+    constexpr bool operator==(const vector<T, Alloc>& lhs, const vector<T, Alloc>& rhs) {
+        return lhs.size() == rhs.size() && mystl::equal(lhs.begin(), lhs.end(), rhs.begin());
+    }
 
 #undef MYSTL_DEBUG
 #undef THROW_LENGTH_ERROR_IF
