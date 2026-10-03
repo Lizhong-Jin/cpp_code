@@ -68,7 +68,27 @@ namespace mystl {
         static constexpr void destroy(T* ptr) {mystl::destroy_at(ptr);}
 
         static constexpr void destroy(T* first, T* last) {mystl::destroy(first, last);}
+
+        template <typename T>
+        constexpr bool operator==(const allocator<T>&) noexcept {
+            return true;
+        }
+
+        template <typename T>
+        constexpr bool operator!=(const allocator<T>&) noexcept {
+            return false;
+        }
     };
+
+    template <typename T1, typename T2>
+    constexpr bool operator==(const allocator<T1>&, const allocator<T2>&) noexcept {
+        return true;
+    }
+
+    template <typename T1, typename T2>
+    constexpr bool operator!=(const allocator<T1>&, const allocator<T2>&) noexcept {
+        return false;
+    }
 
     namespace detail {
         // has_construct

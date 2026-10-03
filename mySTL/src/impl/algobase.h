@@ -641,7 +641,7 @@ namespace mystl {
     // fill_n
     template <typename Output_Iterator, typename Size, typename T>
     constexpr Output_Iterator unchecked_fill_n(Output_Iterator first, Size n, const T& value) {
-        while (n>0) *first = value; ++first; --n;
+        while (n>0) {*first = value; ++first; --n;}
         return first;
     }
 
@@ -663,7 +663,7 @@ namespace mystl {
     // forward iterator
     template <typename Forward_Iterator, typename T>
     constexpr void fill_cat(Forward_Iterator first, Forward_Iterator last, const T& value, forward_iterator_tag) {
-        while (first != last) *first = value; ++first;
+        while (first != last) {*first = value; ++first;}
     }
 
     // random access iterator
