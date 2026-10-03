@@ -239,7 +239,8 @@ namespace mystl {
             range_initialized_n(list.begin(), list.end(), list.size());
         }
 
-        template <mystl::input_iterator Input_Iterator>
+        template <typename Input_Iterator>
+        requires mystl::is_input_iterator_v<Input_Iterator>
         constexpr vector(Input_Iterator first, Input_Iterator last, const allocator_type& alloc = allocator_type())
             : Base(alloc) {
             range_initialized(first, last, iter_category<Input_Iterator>{});
@@ -257,7 +258,8 @@ namespace mystl {
             fill_assign(count, value);
         }
 
-        template <mystl::input_iterator Input_Iterator>
+        template <typename Input_Iterator>
+        requires mystl::is_input_iterator_v<Input_Iterator>
         constexpr void assign(Input_Iterator first, Input_Iterator last) {
             range_assign(first, last, iter_category<Input_Iterator>{});
         }
@@ -999,8 +1001,15 @@ namespace mystl {
         template <typename Input_Iterator>
         constexpr void range_move_assign(Input_Iterator first, Input_Iterator last, size_type n) {
             if (n > capacity()) {
-                vector tmp(mystl::make_move_iterator(first), mystl::make_move_iterator(last), get_T_allocator());
-                this -> M_impl._swap_data(tmp.M_impl);
+                Guard_alloc storage(this -> M_allocate(n), n, *this);
+                mystl::uninitialized_move_a(first, last, storage._storage, get_T_allocator());
+
+                mystl::destroy_a(this -> M_impl._begin, this -> M_impl._end, get_T_allocator());
+                this -> M_deallocate(this -> M_impl._begin, this -> M_impl._end_of_storage - this -> M_impl._begin);
+
+                this -> M_impl._begin = storage.release();
+                this -> M_impl._end = this -> M_impl._begin + n;
+                this -> M_impl._end_of_storage = this -> M_impl._begin + n;
             }else if (n > size()) {
                 auto mid = first + size();
                 mystl::move(first, mid, this -> M_impl._begin);
