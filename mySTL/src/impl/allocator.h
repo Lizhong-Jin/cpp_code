@@ -24,6 +24,11 @@ namespace mystl {
         typedef true_type   propagate_on_container_move_assignment;
         typedef true_type   is_always_equal;
 
+        constexpr allocator() noexcept = default;
+
+        template <typename U>
+        constexpr allocator(const allocator<U>&) noexcept {}
+
         template <typename U>
         struct rebind {
             typedef allocator<U> other;
