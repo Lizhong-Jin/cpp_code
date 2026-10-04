@@ -34,6 +34,7 @@ add_executable(mySTL main.cpp
         src/cmath.h
         src/impl/temporary_buffer.h
         src/vector.h
+        src/deque.h
         src/initializer_list.h
         src/impl/pointer_traits.h)
 
@@ -54,6 +55,9 @@ if(BUILD_TESTING)
     add_executable(mystl_vector_regression test/vector_regression.cpp)
     add_test(NAME mystl_vector_regression COMMAND mystl_vector_regression)
 
+    add_executable(mystl_deque_base_regression test/deque_base_regression.cpp)
+    add_test(NAME mystl_deque_base_regression COMMAND mystl_deque_base_regression)
+
     # Compile each header in a separate translation unit so include order cannot hide dependencies.
     file(GLOB_RECURSE MYSTL_HEADERS CONFIGURE_DEPENDS RELATIVE "${CMAKE_CURRENT_SOURCE_DIR}" "src/*.h")
     set(MYSTL_HEADER_CHECK_SOURCES)
@@ -68,7 +72,7 @@ if(BUILD_TESTING)
 
     option(MYSTL_ENABLE_SANITIZERS "Enable address and undefined behavior sanitizers for tests" OFF)
     if(MYSTL_ENABLE_SANITIZERS AND CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
-        foreach(target mystl_regression mystl_algorithm_regression mystl_vector_regression)
+        foreach(target mystl_regression mystl_algorithm_regression mystl_vector_regression mystl_deque_base_regression)
             target_compile_options(${target} PRIVATE -fsanitize=address,undefined -fno-omit-frame-pointer)
             target_link_options(${target} PRIVATE -fsanitize=address,undefined)
         endforeach()

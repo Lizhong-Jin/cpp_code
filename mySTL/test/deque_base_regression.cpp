@@ -1,0 +1,361 @@
+#include "../src/deque.h"
+
+#include <cstdio>
+#include <cstdint>
+#include <cstdlib>
+#include <limits>
+#include <map>
+#include <memory>
+#include <stdexcept>
+#include <type_traits>
+#include <utility>
+
+#define CHECK(...) do { if (!(__VA_ARGS__)) { \
+    std::fprintf(stderr, "deque base check failed at line %d: %s\n", __LINE__, #__VA_ARGS__); \
+    std::abort(); } } while (false)
+
+struct Allocation { int owner; std::size_t count; };
+struct Audit {
+    static inline std::map<void*, Allocation> allocations;
+    static inline int allocate_before_throw = -1;
+    static inline int construct_before_throw = -1;
+    static inline int pointer_objects = 0;
+    static inline bool throw_map_copy = false;
+    static inline std::size_t map_limit = (std::numeric_limits<std::size_t>::max)();
+    static void tick(int& counter) {
+        if (counter == 0) throw std::bad_alloc();
+        if (counter > 0) --counter;
+    }
+    static void clean() {
+        CHECK(allocations.empty());
+        CHECK(pointer_objects == 0);
+        allocate_before_throw = construct_before_throw = -1;
+        throw_map_copy = false;
+        map_limit = (std::numeric_limits<std::size_t>::max)();
+    }
+};
+
+template <class T>
+struct OwnerAllocator : mystl::allocator<T> {
+    using is_always_equal = mystl::false_type;
+    template <class U> struct rebind { using other = OwnerAllocator<U>; };
+    int owner = 0;
+    OwnerAllocator() = default;
+    explicit OwnerAllocator(int id) : owner(id) {}
+    OwnerAllocator(const OwnerAllocator& other) : owner(other.owner) {
+        if constexpr (std::is_pointer_v<T>)
+            if (Audit::throw_map_copy) throw std::runtime_error("map allocator copy");
+    }
+    template <class U>
+    OwnerAllocator(const OwnerAllocator<U>& other) : owner(other.owner) {}
+    bool operator==(const OwnerAllocator& other) const noexcept { return owner == other.owner; }
+    T* allocate(std::size_t n) {
+        CHECK(n <= max_size());
+        Audit::tick(Audit::allocate_before_throw);
+        T* p = mystl::allocator<T>::allocate(n);
+        CHECK(Audit::allocations.emplace(p, Allocation{owner, n}).second);
+        return p;
+    }
+    void deallocate(T* p, std::size_t n) noexcept {
+        auto found = Audit::allocations.find(p);
+        CHECK(found != Audit::allocations.end());
+        CHECK(found->second.owner == owner && found->second.count == n);
+        Audit::allocations.erase(found);
+        mystl::allocator<T>::deallocate(p, n);
+    }
+    std::size_t max_size() const noexcept {
+        if constexpr (std::is_pointer_v<T>) return Audit::map_limit;
+        return (std::numeric_limits<std::size_t>::max)() / sizeof(T);
+    }
+    template <class U, class... Args>
+    void construct(U* p, Args&&... args) {
+        Audit::tick(Audit::construct_before_throw);
+        std::construct_at(p, std::forward<Args>(args)...);
+        if constexpr (std::is_pointer_v<U>) ++Audit::pointer_objects;
+    }
+    template <class U>
+    void destroy(U* p) noexcept {
+        if constexpr (std::is_pointer_v<U>) --Audit::pointer_objects;
+        std::destroy_at(p);
+    }
+};
+
+// Exposes only raw storage operations for tests. Tests explicitly manage any T
+// objects they construct, matching the base/derived-container lifetime contract.
+template <class T, class Alloc = OwnerAllocator<T>>
+struct Storage : mystl::deque_base<T, Alloc> {
+    using Base = mystl::deque_base<T, Alloc>;
+    using typename Base::iterator;
+    using typename Base::const_iterator;
+    static constexpr std::size_t B = Base::block_size;
+    explicit Storage(std::size_t n = 0, const Alloc& alloc = Alloc()) : Base(n, alloc) {}
+    Storage(Storage&& other) : Base(std::move(other)) {}
+    Storage(Storage&& other, const Alloc& alloc) : Base(std::move(other), alloc) {}
+    iterator begin() { return this->M_start; }
+    iterator end() { return this->M_finish; }
+    const_iterator begin() const { return this->M_start; }
+    const_iterator end() const { return this->M_finish; }
+    std::size_t size() const { return this->M_storage_size(); }
+    auto map() const { return this->M_map; }
+    std::size_t capacity() const { return this->M_map_size; }
+    std::size_t blocks() const {
+        std::size_t n = 0;
+        for (std::size_t i = 0; i < capacity(); ++i) n += map()[i] != nullptr;
+        return n;
+    }
+    void front(std::size_t n) { this->M_reserve_map_at_front(n); }
+    void back(std::size_t n) { this->M_reserve_map_at_back(n); }
+    void initialize(std::size_t n) { this->M_initialize_map(n); }
+    // Call after destroying the prefix. Keep the first block allocated.
+    void drop_prefix_in_first_block(std::size_t n) {
+        CHECK(n < B && n <= size());
+        this->M_start += static_cast<std::ptrdiff_t>(n);
+    }
+};
+
+using It = mystl::deque<int>::iterator;
+using CIt = mystl::deque<int>::const_iterator;
+static_assert(std::is_same_v<CIt::value_type, int>);
+static_assert(std::is_same_v<CIt::reference, const int&>);
+static_assert(std::is_convertible_v<It, CIt>);
+static_assert(!std::is_convertible_v<CIt, It>);
+static_assert(mystl::is_random_access_iterator_v<It>);
+static_assert(!mystl::is_contiguous_iterator_v<It>);
+static_assert(!std::is_copy_constructible_v<Storage<int>>);
+static_assert(!std::is_move_assignable_v<Storage<int>>);
+static_assert(std::is_same_v<
+    mystl::allocator_traits<mystl::allocator<int>>::rebind_alloc<int*>, mystl::allocator<int*>>);
+
+struct alignas(1024) Large {
+    static inline int constructed = 0;
+    static inline int destroyed = 0;
+    int value;
+    Large() = delete;
+    explicit Large(int v) : value(v) { ++constructed; }
+    ~Large() { ++destroyed; }
+};
+
+void test_storage_boundaries() {
+    constexpr auto B = Storage<int>::B;
+    for (std::size_t n : {std::size_t(0), B - 1, B, B + 1, 3 * B}) {
+        {
+            Storage<int> s(n, OwnerAllocator<int>(7));
+            CHECK(s.size() == n);
+            CHECK(s.blocks() == n / B + 1);
+            CHECK(s.capacity() >= s.blocks() + 2);
+            CHECK(s.end() - s.begin() == static_cast<std::ptrdiff_t>(n));
+            CHECK(s.begin() + static_cast<std::ptrdiff_t>(n) == s.end());
+            CHECK(s.get_allocator().owner == 7);
+        }
+        Audit::clean();
+    }
+    {
+        Storage<Large> s(3);
+        CHECK(s.B == 1 && s.blocks() == 4);
+        CHECK(Large::constructed == 0 && Large::destroyed == 0);
+        for (int i = 0; i < 3; ++i) {
+            auto p = (s.begin() + i).operator->();
+            CHECK(reinterpret_cast<std::uintptr_t>(p) % alignof(Large) == 0);
+            std::construct_at(p, i);
+        }
+        CHECK((s.end() - 1)->value == 2);
+        auto it = s.end();
+        CHECK((--it)->value == 2);
+        CHECK((it - 2)->value == 0);
+        for (auto p = s.begin(); p != s.end(); ++p) std::destroy_at(p.operator->());
+    }
+    CHECK(Large::constructed == 3 && Large::destroyed == 3);
+    Audit::clean();
+}
+
+void test_iterators_and_map_growth() {
+    {
+        constexpr int B = Storage<int>::B;
+        const int n = 3 * B + 7;
+        Storage<int> s(n);
+        for (int i = 0; i < n; ++i) std::construct_at((s.begin() + i).operator->(), i);
+        const auto& cs = s;
+        for (int i = 0; i <= n; ++i) {
+            It a = s.begin() + i;
+            CIt c = a;
+            CHECK(a == c && c == a);
+            CHECK(c - s.begin() == i && s.end() - c == n - i);
+            for (int j = 0; j <= n; ++j) {
+                auto b = a + (j - i);
+                CHECK(b == s.begin() + j);
+                CHECK(a - (i - j) == b);
+                CHECK((a < b) == (i < j));
+                CHECK((c >= b) == (i >= j));
+                CHECK((a <= b) == (i <= j));
+                CHECK((c > b) == (i > j));
+            }
+            if (i < n) CHECK(a[0] == i && (i + cs.begin())[0] == i);
+        }
+        auto it = s.begin();
+        for (int i = 0; i < n; ++i) CHECK(*it++ == i);
+        CHECK(it == s.end());
+        for (int i = n - 1; i >= 0; --i) { auto old = it--; CHECK(*it == i); CHECK(old == it + 1); }
+        auto forward = s.begin();
+        mystl::advance(forward, B + 2);
+        CHECK(*forward == B + 2);
+        CHECK(mystl::distance(s.begin(), s.end()) == n);
+        mystl::reverse_iterator<It> reverse(s.end());
+        CHECK(*reverse == n - 1 && reverse[B] == n - B - 1);
+        // Grow in both directions; element addresses and offsets must not change.
+        int* saved = (s.begin() + B + 5).operator->();
+        s.front(100);
+        CHECK(s.size() == static_cast<std::size_t>(n));
+        CHECK((s.begin() + B + 5).operator->() == saved && *saved == B + 5);
+        s.back(300);
+        CHECK(s.end()[-1] == n - 1 && s.blocks() == 4);
+        CHECK((s.begin() + B + 5).operator->() == saved);
+        // Exercise recentering within the current capacity and the no-op path.
+        auto old_capacity = s.capacity();
+        s.front(old_capacity / 2);
+        CHECK(s.capacity() == old_capacity);
+        auto old_map = s.map();
+        auto old_begin = s.begin();
+        s.front(0);
+        s.front(1);
+        CHECK(s.map() == old_map && s.begin() == old_begin);
+        for (auto p = s.begin(); p != s.end(); ++p) std::destroy_at(p.operator->());
+    }
+    Audit::clean();
+}
+
+void test_moves() {
+    {
+        Storage<int> source(200, OwnerAllocator<int>(1));
+        auto original_map = source.map();
+        Storage<int> same(std::move(source), OwnerAllocator<int>(1));
+        CHECK(same.map() == original_map && source.map() == nullptr && source.size() == 0);
+        CHECK(source.begin() + 0 == source.end());
+        source.initialize(0); // moved-from storage remains reusable
+        CHECK(source.blocks() == 1);
+        Storage<int> unequal(std::move(same), OwnerAllocator<int>(2));
+        CHECK(same.map() == original_map && same.size() == 200);
+        CHECK(unequal.map() != original_map && unequal.size() == 200);
+        CHECK(unequal.get_allocator().owner == 2);
+        auto unequal_map = unequal.map();
+        Storage<int> moved(std::move(unequal));
+        CHECK(moved.map() == unequal_map && unequal.size() == 0);
+        CHECK(moved.get_allocator().owner == 2);
+        Storage<int> singular(std::move(unequal));
+        CHECK(singular.size() == 0 && singular.map() == nullptr);
+    }
+    Audit::clean(); // deallocate checks validate owner AND exact allocation size
+    {
+        Storage<int> source(200, OwnerAllocator<int>(1));
+        auto map = source.map();
+        Audit::throw_map_copy = true;
+        bool threw = false;
+        try { Storage<int> target(std::move(source)); }
+        catch (const std::runtime_error&) { threw = true; }
+        Audit::throw_map_copy = false;
+        CHECK(threw && source.map() == map && source.size() == 200);
+    }
+    Audit::clean();
+}
+
+void test_nonzero_start_offset() {
+    {
+        constexpr int B = Storage<int>::B;
+        Storage<int> s(2 * B + 3);
+        for (int i = 0; i < 2 * B + 3; ++i)
+            std::construct_at((s.begin() + i).operator->(), i);
+        for (int i = 0; i < B - 1; ++i)
+            std::destroy_at((s.begin() + i).operator->());
+        s.drop_prefix_in_first_block(B - 1);
+        int* first = s.begin().operator->();
+        CHECK(*first == B - 1 && s.size() == B + 4);
+        s.front(100);
+        s.back(300);
+        CHECK(s.begin().operator->() == first && *s.begin() == B - 1);
+        CHECK(s.end()[-1] == 2 * B + 2 && s.end() - s.begin() == B + 4);
+        auto it = s.begin();
+        CHECK(*++it == B && *--it == B - 1);
+        for (auto p = s.begin(); p != s.end(); ++p) std::destroy_at(p.operator->());
+    }
+    Audit::clean();
+}
+
+void test_exceptions() {
+    // Map allocation, followed by each of three block allocations.
+    for (int failure = 0; failure < 4; ++failure) {
+        Audit::allocate_before_throw = failure;
+        bool threw = false;
+        try { Storage<int> s(2 * Storage<int>::B); }
+        catch (const std::bad_alloc&) { threw = true; }
+        CHECK(threw);
+        Audit::clean();
+    }
+    // Every pointer construction position in the initial eight-slot map.
+    for (int failure = 0; failure < 8; ++failure) {
+        Audit::construct_before_throw = failure;
+        bool threw = false;
+        try { Storage<int> s; }
+        catch (const std::bad_alloc&) { threw = true; }
+        CHECK(threw);
+        Audit::clean();
+    }
+    {
+        Storage<int> s(200, OwnerAllocator<int>(5));
+        auto map = s.map();
+        auto begin = s.begin();
+        auto end = s.end();
+        const auto count = Audit::allocations.size();
+        const int pointers = Audit::pointer_objects;
+        for (int mode = 0; mode < 3; ++mode) {
+            bool threw = false;
+            Audit::allocate_before_throw = mode == 0 ? 0 : -1;
+            Audit::construct_before_throw = mode == 1 ? 3 : -1;
+            try {
+                if (mode == 2) s.front((std::numeric_limits<std::size_t>::max)());
+                else s.back(100);
+            } catch (const std::bad_alloc&) { threw = true; }
+              catch (const mystl::length_error&) { threw = true; }
+            CHECK(threw && s.map() == map && s.begin() == begin && s.end() == end);
+            CHECK(Audit::allocations.size() == count && Audit::pointer_objects == pointers);
+        }
+        Audit::allocate_before_throw = Audit::construct_before_throw = -1;
+        bool threw = false;
+        Audit::allocate_before_throw = 1; // unequal move: new map succeeds, first block fails
+        try { Storage<int> target(std::move(s), OwnerAllocator<int>(6)); }
+        catch (const std::bad_alloc&) { threw = true; }
+        Audit::allocate_before_throw = -1;
+        CHECK(threw && s.map() == map && s.begin() == begin && s.end() == end);
+        CHECK(Audit::allocations.size() == count && Audit::pointer_objects == pointers);
+    }
+    Audit::clean();
+    {
+        bool threw = false;
+        try { Storage<int> s((std::numeric_limits<std::size_t>::max)()); }
+        catch (const mystl::length_error&) { threw = true; }
+        CHECK(threw);
+    }
+    Audit::clean();
+    {
+        Audit::map_limit = 3;
+        Storage<int> s;
+        CHECK(s.capacity() == 3);
+        auto map = s.map();
+        bool threw = false;
+        try { s.back(2); } catch (const mystl::length_error&) { threw = true; }
+        CHECK(threw && s.map() == map && s.size() == 0);
+    }
+    Audit::clean();
+}
+
+int main() {
+    mystl::allocator<int> alloc;
+    mystl::allocator<int*> map_alloc(alloc);
+    auto map = map_alloc.allocate(8);
+    map_alloc.deallocate(map, 8);
+    { mystl::deque<int> scaffold; }
+    test_storage_boundaries();
+    test_iterators_and_map_growth();
+    test_moves();
+    test_nonzero_start_offset();
+    test_exceptions();
+    std::puts("deque base regression tests passed");
+}
