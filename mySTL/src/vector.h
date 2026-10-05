@@ -389,6 +389,14 @@ namespace mystl {
             return const_reverse_iterator(this -> M_impl._begin);
         }
 
+        [[nodiscard]] constexpr const_reverse_iterator crbegin() const noexcept {
+            return const_reverse_iterator(this -> M_impl._end);
+        }
+
+        [[nodiscard]] constexpr const_reverse_iterator crend() const noexcept {
+            return const_reverse_iterator(this -> M_impl._begin);
+        }
+
         // *************************************************************************************
         // capacity of vector
         // empty
