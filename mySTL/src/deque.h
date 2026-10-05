@@ -323,7 +323,7 @@ namespace mystl {
             }
             iterator start(map + new_front, static_cast<size_type>(M_start._cur - M_start._first));
             iterator finish(map + new_front + used - 1, static_cast<size_type>(M_finish._cur - M_finish._first));
-            M_deallocate_map(M_map);
+            M_deallocate_map(M_map, M_map_size);
             M_map = map;
             M_map_size = capacity;
             M_start = start;
@@ -558,7 +558,28 @@ namespace mystl {
     public:
         // *************************************************************************************
         // modifiers of deque
-
+        constexpr void clear() noexcept {
+            if (empty()) return;
+            mystl::destroy_a(M_start, M_finish, get_T_allocator());
+            const size_type mid = (M_map_size - 1) / 2;
+            const size_type front = M_start._node - M_map;
+            const size_type back = M_finish._node - M_map;
+            if (front > mid) {
+                mid = front;
+            }else if (back < mid) {
+                mid = back;
+            }
+            for (size_type i = front; i < mid; ++i) {
+                Base::M_deallocate_node(M_map[i]);
+                M_map[i] = nullptr;
+            }
+            for (size_type i = mid + 1; i <= back; ++i) {
+                Base::M_deallocate_node(M_map[i]);
+                M_map[i] = nullptr;
+            }
+            M_start = iterator(M_map + mid, 0);
+            M_finish = iterator(M_map + mid, 0);
+        }
 
 
     private:
