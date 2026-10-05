@@ -296,6 +296,11 @@ namespace mystl {
             return *this;
         }
 
+        constexpr vector& operator=(initializer_list<value_type> list) {
+            range_assign(list.begin(), list.end(), list.size());
+            return *this;
+        }
+
 
         // *************************************************************************************
         // element access

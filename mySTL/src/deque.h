@@ -562,12 +562,13 @@ namespace mystl {
             if (this != &other){
                 if constexpr (Allocator_traits::propagate_on_container_copy_assignment::value) {
                     if (get_T_allocator() != other.get_T_allocator()) {
-                        clear();
+                        mystl::destroy_a(M_start, M_finish, get_T_allocator());
+                        Base::M_release_storage();
                     }
                     // Propagation is required even when the allocators compare equal.
                     get_T_allocator() = other.get_T_allocator();
                 }
-                assign(ohter.begin(), other.end());
+                assign(other.begin(), other.end());
             }
             return *this;
         }
@@ -584,6 +585,7 @@ namespace mystl {
 
         constexpr deque& operator=(initializer_list<value_type> list) {
             range_assign(list.begin(), list.end(), list.size());
+            return *this;
         }
 
         // *************************************************************************************
@@ -809,6 +811,7 @@ namespace mystl {
             void range_assign_until(Input_Iterator first, iterator end) {
                 while (last != end) {
                     Allocator_traits::construct(alloc, last.operator->(), *first);
+                    ++first;
                     ++last;
                 }
             }
@@ -816,6 +819,7 @@ namespace mystl {
             void range_move_assign_until(Input_Iterator first, iterator end) {
                 while (last != end) {
                     Allocator_traits::construct(alloc, last.operator->(), mystl::move(*first));
+                    ++first;
                     ++last;
                 }
             }
@@ -927,10 +931,14 @@ namespace mystl {
 
         template <typename Iterator>
         constexpr void range_assign(Iterator first, Iterator last, size_type n) {
+            if (n > max_size())
+                throw mystl::length_error("cannot create deque larger than max_size()");
             if (n == 0){
                 clear();
                 return;
             }
+            if (!M_map) Base::M_initialize_map(0);
+
             size_type full_size = M_map_size * block_size - 1;
             if (n > full_size) {
                 Base::M_reallocate_map(n / block_size + 1);
@@ -1009,35 +1017,41 @@ namespace mystl {
         }
 
         // move assign
-        constexpr void move_assign(vector&& other, true_type) {
+        constexpr void move_assign(deque&& other, true_type) {
             get_T_allocator() = mystl::move(other.get_T_allocator());
+            mystl::destroy_a(M_start, M_finish, get_T_allocator());
             Base::M_release_storage();
             Base::M_swap_data(other);
         }
 
-        constexpr void move_assign(vector&& other, false_type) {
+        constexpr void move_assign(deque&& other, false_type) {
             if (get_T_allocator() == other.get_T_allocator()) {
+                mystl::destroy_a(M_start, M_finish, get_T_allocator());
                 Base::M_release_storage();
                 Base::M_swap_data(other);
             }else {
                 range_move_assign(other.begin(), other.end(), other.size());
+                mystl::destroy_a(other.M_start, other.M_finish, get_T_allocator());
                 other.M_release_storage();
             }
         }
 
         template <typename Forward_Iterator>
         constexpr void range_move_assign(Forward_Iterator first, Forward_Iterator last, size_type n) {
-            check_init_len(n, get_T_allocator());
+            if (n > max_size())
+                throw mystl::length_error("cannot create deque larger than max_size()");
             if (n == 0) {
                 clear();
                 return;
             }
+            if (!M_map) Base::M_initialize_map(0);
+
             size_type full_size = M_map_size * block_size - 1;
             if (n > full_size) {
-                Base::M_reallocate_map(count / block_size + 1);
+                Base::M_reallocate_map(n / block_size + 1);
                 full_size = M_map_size * block_size - 1;
             }
-            if (count > size()) {
+            if (n > size()) {
                 range_move_assign_impl(first, last, n);
             }else {
                 const size_type redundant_n = size() - n;
@@ -1142,7 +1156,7 @@ namespace mystl {
 
         // range and length helper
         constexpr void range_check(size_type idx) const {
-            if (idx > size()) {
+            if (idx >= size()) {
                 throw mystl::out_of_range("index out of range");
             }
         }
