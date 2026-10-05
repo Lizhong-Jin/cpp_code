@@ -263,7 +263,7 @@ namespace mystl {
         }
 
         template <typename Input_Iterator>
-        requires mystl::is_input_iterator_v<Input_Iterator>
+            requires mystl::is_input_iterator_v<Input_Iterator>
         constexpr void assign(Input_Iterator first, Input_Iterator last) {
             range_assign(first, last, iter_category<Input_Iterator>{});
         }
@@ -1129,8 +1129,8 @@ namespace mystl {
             }
         }
 
-        template <typename Input_Iterator>
-        constexpr void range_assign(Input_Iterator first, Input_Iterator last, forward_iterator_tag) {
+        template <typename Forward_Iterator>
+        constexpr void range_assign(Forward_Iterator first, Forward_Iterator last, forward_iterator_tag) {
             const size_type n = mystl::distance(first, last);
             range_assign(first, last, n);
         }
