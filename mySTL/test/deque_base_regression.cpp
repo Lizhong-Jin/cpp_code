@@ -346,6 +346,87 @@ void test_exceptions() {
     Audit::clean();
 }
 
+struct MoveOnlyElement {
+    static inline int live = 0;
+    static inline int moves = 0;
+    static inline int moves_before_throw = -1;
+    int value = 0;
+    MoveOnlyElement() { ++live; }
+    MoveOnlyElement(const MoveOnlyElement&) = delete;
+    MoveOnlyElement(MoveOnlyElement&& other) : value(other.value) {
+        if (moves_before_throw == 0) throw std::runtime_error("element move");
+        if (moves_before_throw > 0) --moves_before_throw;
+        other.value = -1;
+        ++moves;
+        ++live;
+    }
+    ~MoveOnlyElement() { --live; }
+};
+
+// Inspect the public constructor without requiring unfinished deque accessors.
+struct MoveDeque : mystl::deque<MoveOnlyElement, OwnerAllocator<MoveOnlyElement>> {
+    using Alloc = OwnerAllocator<MoveOnlyElement>;
+    using Container = mystl::deque<MoveOnlyElement, Alloc>;
+    MoveDeque(std::size_t n, const Alloc& alloc) : Container(n, alloc) {}
+    MoveDeque(MoveDeque&& other, const Alloc& alloc)
+        : Container(mystl::move(static_cast<Container&>(other)), alloc) {}
+    auto first() { return this->M_start; }
+    auto count() const { return this->M_finish - this->M_start; }
+};
+
+void test_allocator_extended_move() {
+    constexpr int B = mystl::deque_block_size<MoveOnlyElement>;
+    constexpr int n = 2 * B + 3;
+    for (bool equal : {true, false}) {
+        MoveOnlyElement::moves = 0;
+        {
+            MoveDeque source(n, MoveDeque::Alloc(1));
+            for (int i = 0; i < n; ++i) source.first()[i].value = i;
+            auto original_address = source.first().operator->();
+            MoveDeque target(mystl::move(source), MoveDeque::Alloc(equal ? 1 : 2));
+            CHECK(target.count() == n && source.count() == 0);
+            CHECK(MoveOnlyElement::live == n);
+            CHECK(MoveOnlyElement::moves == (equal ? 0 : n));
+            if (equal) CHECK(target.first().operator->() == original_address);
+            for (int i = 0; i < n; ++i) CHECK(target.first()[i].value == i);
+        }
+        CHECK(MoveOnlyElement::live == 0);
+        Audit::clean();
+    }
+    for (int failure : {0, B + 1}) {
+        {
+            MoveDeque source(n, MoveDeque::Alloc(1));
+            for (int i = 0; i < n; ++i) source.first()[i].value = i;
+            const auto original_begin = source.first();
+            const auto allocation_count = Audit::allocations.size();
+            const auto pointer_count = Audit::pointer_objects;
+            MoveOnlyElement::moves = 0;
+            MoveOnlyElement::moves_before_throw = failure;
+            bool threw = false;
+            try { MoveDeque target(mystl::move(source), MoveDeque::Alloc(2)); }
+            catch (const std::runtime_error&) { threw = true; }
+            MoveOnlyElement::moves_before_throw = -1;
+            CHECK(threw && source.count() == n && source.first() == original_begin);
+            CHECK(MoveOnlyElement::live == n && MoveOnlyElement::moves == failure);
+            CHECK(Audit::allocations.size() == allocation_count);
+            CHECK(Audit::pointer_objects == pointer_count);
+            for (int i = 0; i < n; ++i)
+                CHECK(source.first()[i].value == (i < failure ? -1 : i));
+        }
+        CHECK(MoveOnlyElement::live == 0);
+        Audit::clean();
+    }
+    {
+        MoveDeque empty(0, MoveDeque::Alloc(1));
+        MoveDeque target(mystl::move(empty), MoveDeque::Alloc(2));
+        CHECK(empty.count() == 0 && target.count() == 0);
+        // Moving again from the now singular source must remain safe.
+        MoveDeque again(mystl::move(empty), MoveDeque::Alloc(2));
+        CHECK(again.count() == 0 && MoveOnlyElement::live == 0);
+    }
+    Audit::clean();
+}
+
 int main() {
     mystl::allocator<int> alloc;
     mystl::allocator<int*> map_alloc(alloc);
@@ -357,5 +438,6 @@ int main() {
     test_moves();
     test_nonzero_start_offset();
     test_exceptions();
+    test_allocator_extended_move();
     std::puts("deque base regression tests passed");
 }

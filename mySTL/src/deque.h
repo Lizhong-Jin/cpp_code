@@ -368,6 +368,7 @@ namespace mystl {
         }
     };
 
+
     // Container interface scaffold. Element construction and modifiers are not
     // implemented yet; do not expose the base's raw-size constructor as a deque ctor.
     template <typename T, typename Allocator = mystl::allocator<T>>
@@ -396,6 +397,8 @@ namespace mystl {
         using const_iterator = deque_iterator<T, true>;
         using reverse_iterator = mystl::reverse_iterator<iterator>;
         using const_reverse_iterator = mystl::reverse_iterator<const_iterator>;
+
+        constexpr allocator_type get_allocator() const noexcept {return Base::get_allocator();}
 
         // *************************************************************************************
         // construct
@@ -429,8 +432,9 @@ namespace mystl {
 
     public:
         template <typename Input_Iterator>
+            requires mystl::is_input_iterator_v<Input_Iterator>
         deque(Input_Iterator first, Input_Iterator last, const allocator_type& alloc = Allocator()) 
-            : deque(first, last, alloc, iter_category<Input_Iterator>{})
+            : deque(first, last, alloc, iter_category<Input_Iterator>{}) {}
 
         deque(const deque& other) 
             : deque(other, Allocator_traits::select_on_container_copy_construction(other.get_T_allocator())) {}
@@ -444,7 +448,17 @@ namespace mystl {
         deque(deque&& other) : Base(mystl::move(other)) {}
 
         deque(deque&& other, const type_identity_t<allocator_type>& alloc) 
-            : Base(mystl::move(other), alloc) {}
+            : Base(mystl::move(other), alloc) {
+            // A storage transfer leaves the source map null. Otherwise the base
+            // only prepared raw destination storage for unequal allocators.
+            if (other.M_map != nullptr) {
+                // This helper destroys any partially constructed destination on
+                // failure; base destruction then releases its raw storage.
+                mystl::uninitialized_move_a(other.M_start, other.M_finish, M_start, get_T_allocator());
+                mystl::destroy_a(other.M_start, other.M_finish, other.get_T_allocator());
+                other.M_release_storage();
+            }
+        }
 
         deque(initializer_list<value_type> list, const allocator_type& alloc = Allocator())
             : Base(list.size(), alloc) {
@@ -457,8 +471,34 @@ namespace mystl {
             mystl::destroy_a(M_start, M_finish, get_T_allocator());
         }
 
+        // *************************************************************************************
+        // operator == and assign
+        constexpr void assign(size_type count, const value_type& value) {
+            fill_assign(count, value);
+        }
+
+        // *************************************************************************************
+        // capacity
+        [[nodiscard]] constexpr bool empty() const noexcept {
+            
+        }
+
+
 
     private:
+
+        constexpr void fill_assign(size_type count, const value_type& value) {
+            size_type full_size = this -> M_map_size * block_size;
+            if (count > fill_size){
+                deque tmp(count, value, get_T_allocator());
+                clear();
+                this -> M_take_storage(tmp);
+            }else if (count > size()){
+                size_type
+            }
+        }
+
+
         constexpr void default_initialize(size_type n) {
             uninitialized_default_construct_n_a(M_start, n, get_T_allocator());
         }
@@ -488,7 +528,6 @@ namespace mystl {
         constexpr void range_initialize(Forward_Iterator first, Forward_Iterator last, forward_iterator_tag) {
             uninitialized_copy_a(first, last, M_start, get_T_allocator());
         }
-
 
         static constexpr size_type check_init_len(const size_type n, const T_alloc_type& alloc) {
             if (n > get_max_size(alloc)) {
