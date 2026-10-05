@@ -206,11 +206,9 @@ namespace mystl {
 
         // *************************************************************************************
         // swap
-        using mystl::swap;
-        constexpr void swap(priority_queue& other)  
-            noexcept(noexcept(swap(c, other.c)) && noexcept(swap(comp, other.comp)))
-        {
+        constexpr void swap(priority_queue& other) noexcept {
             if (this != &other) {
+                using mystl::swap;
                 swap(c, other.c);
                 swap(comp, other.comp);
             }

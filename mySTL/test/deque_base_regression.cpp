@@ -427,6 +427,168 @@ void test_allocator_extended_move() {
     Audit::clean();
 }
 
+struct GuardElement {
+    static inline std::map<const GuardElement*, bool> live;
+    static inline int copies_before_throw = -1;
+    static inline int assignments_before_throw = -1;
+    int value = 0;
+
+    explicit GuardElement(int n = 0) : value(n) { CHECK(live.emplace(this, true).second); }
+    GuardElement(const GuardElement& other) : value(other.value) {
+        tick(copies_before_throw);
+        CHECK(live.emplace(this, true).second);
+    }
+    GuardElement& operator=(const GuardElement& other) {
+        CHECK(live.count(this) && live.count(&other));
+        tick(assignments_before_throw);
+        value = other.value;
+        return *this;
+    }
+    ~GuardElement() { CHECK(live.erase(this) == 1); }
+    static void tick(int& n) {
+        if (n == 0) throw std::runtime_error("guard element failure");
+        if (n > 0) --n;
+    }
+};
+
+template <class T>
+struct AssignDeque : mystl::deque<T, OwnerAllocator<T>> {
+    using Container = mystl::deque<T, OwnerAllocator<T>>;
+    explicit AssignDeque(std::size_t n = 0) : Container(n, OwnerAllocator<T>(17)) {}
+    AssignDeque(AssignDeque&& other) : Container(mystl::move(static_cast<Container&>(other))) {}
+    auto first() { return this->M_start; }
+    auto map() { return this->M_map; }
+    auto map_size() { return this->M_map_size; }
+};
+
+void test_assign_guards() {
+    constexpr int B = mystl::deque_block_size<GuardElement>;
+    constexpr int n = B + 5;
+    constexpr int target = 2 * B + 20; // grows at BOTH ends (11 head elements for B=128)
+    // Snapshot copy, partial head, first/partial tail construction failures.
+    for (int failure : {0, 1, 7, 12, 15}) {
+        {
+            AssignDeque<GuardElement> d(n);
+            GuardElement value(42);
+            auto address = d.first().operator->();
+            auto allocations = Audit::allocations.size();
+            auto pointers = Audit::pointer_objects;
+            GuardElement::copies_before_throw = failure;
+            bool threw = false;
+            try { d.assign(target, value); } catch (const std::runtime_error&) { threw = true; }
+            GuardElement::copies_before_throw = -1;
+            CHECK(threw && d.size() == n && d.first().operator->() == address);
+            CHECK(GuardElement::live.size() == n + 1);
+            CHECK(Audit::allocations.size() == allocations && Audit::pointer_objects == pointers);
+            // A second operation must be able to reuse the slots cleared by rollback.
+            d.assign(target, value);
+            CHECK(d.size() == target && GuardElement::live.size() == target + 1);
+        }
+        CHECK(GuardElement::live.empty());
+        Audit::clean();
+    }
+    // Assignment fails after head objects were already successfully constructed.
+    for (int failure : {0, 7, n - 1}) {
+        {
+            AssignDeque<GuardElement> d(n);
+            GuardElement value(42);
+            auto allocations = Audit::allocations.size();
+            GuardElement::assignments_before_throw = failure;
+            bool threw = false;
+            try { d.assign(target, value); } catch (const std::runtime_error&) { threw = true; }
+            GuardElement::assignments_before_throw = -1;
+            CHECK(threw && d.size() == n && GuardElement::live.size() == n + 1);
+            CHECK(Audit::allocations.size() == allocations);
+            // Shrinking must also leave every original object alive on assignment failure.
+            GuardElement::assignments_before_throw = 1;
+            threw = false;
+            try { d.assign(3, value); } catch (const std::runtime_error&) { threw = true; }
+            GuardElement::assignments_before_throw = -1;
+            CHECK(threw && d.size() == n && GuardElement::live.size() == n + 1);
+        }
+        CHECK(GuardElement::live.empty());
+        Audit::clean();
+    }
+    // Failure in the first or second block allocation, and allocator construct hooks.
+    for (int mode = 0; mode < 4; ++mode) {
+        {
+            AssignDeque<GuardElement> d(n);
+            GuardElement value(42);
+            const auto allocations = Audit::allocations.size();
+            if (mode < 2) Audit::allocate_before_throw = mode;
+            else Audit::construct_before_throw = mode == 2 ? 0 : 12;
+            bool threw = false;
+            try { d.assign(target, value); } catch (const std::bad_alloc&) { threw = true; }
+            Audit::allocate_before_throw = Audit::construct_before_throw = -1;
+            CHECK(threw && d.size() == n && GuardElement::live.size() == n + 1);
+            CHECK(Audit::allocations.size() == allocations);
+        }
+        CHECK(GuardElement::live.empty());
+        Audit::clean();
+    }
+    // A map expansion may remain committed under the basic exception guarantee,
+    // but the old elements and only their blocks must remain after rollback.
+    {
+        AssignDeque<GuardElement> d(n);
+        GuardElement value(42);
+        auto address = d.first().operator->();
+        const auto allocations = Audit::allocations.size();
+        GuardElement::copies_before_throw = 300;
+        bool threw = false;
+        try { d.assign(20 * B, value); } catch (const std::runtime_error&) { threw = true; }
+        GuardElement::copies_before_throw = -1;
+        CHECK(threw && d.size() == n && d.first().operator->() == address);
+        CHECK(GuardElement::live.size() == n + 1 && Audit::allocations.size() == allocations);
+        CHECK(Audit::pointer_objects == int(d.map_size()));
+        d.assign(20 * B, value);
+        CHECK(d.size() == 20 * B);
+        // An aliased value survives shrinking and freeing its original block.
+        d.assign(1, d.first()[0]);
+        CHECK(d.size() == 1 && d.first()[0].value == 42);
+        d.assign(0, d.first()[0]);
+        CHECK(d.empty() && GuardElement::live.size() == 1);
+    }
+    CHECK(GuardElement::live.empty());
+    Audit::clean();
+}
+
+void test_assign_sequences() {
+    {
+        AssignDeque<int> d;
+        std::uint32_t random = 941;
+        for (int step = 0; step < 1000; ++step) {
+            random = random * 1664525u + 1013904223u;
+            const std::size_t count = random % 4000;
+            d.assign(count, step);
+            CHECK(d.size() == count);
+            for (std::size_t i = 0; i < count; ++i) CHECK(d.first()[i] == step);
+            if (step % 13 == 0) { d.clear(); CHECK(d.empty()); }
+        }
+        d.assign(128, 3);
+        d.assign(129, d.first()[0]);
+        CHECK(d.first()[128] == 3);
+        AssignDeque<int> moved(mystl::move(d));
+        d.assign(300, 9);
+        CHECK(d.size() == 300 && d.first()[299] == 9 && moved.size() == 129);
+    }
+    Audit::clean();
+    struct Big {
+        char padding[512]{};
+        int value = 0;
+    };
+    static_assert(mystl::deque_block_size<Big> == 1);
+    {
+        AssignDeque<Big> d;
+        Big value; value.value = 17;
+        for (std::size_t n : {1u, 2u, 20u, 3u, 0u, 7u}) {
+            d.assign(n, value);
+            CHECK(d.size() == n);
+            for (std::size_t i = 0; i < n; ++i) CHECK(d.first()[i].value == 17);
+        }
+    }
+    Audit::clean();
+}
+
 int main() {
     mystl::allocator<int> alloc;
     mystl::allocator<int*> map_alloc(alloc);
@@ -439,5 +601,7 @@ int main() {
     test_nonzero_start_offset();
     test_exceptions();
     test_allocator_extended_move();
+    test_assign_guards();
+    test_assign_sequences();
     std::puts("deque base regression tests passed");
 }

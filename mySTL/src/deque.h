@@ -12,7 +12,6 @@
 #include "utility.h"
 #include "stdexcept.h"
 #include "initializer_list.h"
-#include "vector.h"
 
 namespace mystl {
 
@@ -235,11 +234,11 @@ namespace mystl {
 
         constexpr size_type M_get_front_empty_position() noexcept {
             const size_type front_slot = M_get_front_slot();
-            return static_cast<size_type>(front_slot * block_size + M_start._cur - M_start._first);
+            return front_slot * block_size + static_cast<size_type>(M_start._cur - M_start._first);
         }
         constexpr size_type M_get_back_empty_position() noexcept {
             const size_type back_slot = M_get_back_slot();
-            return static_cast<size_type>(back_slot * block_size + M_finish._last - M_finish._cur - 1);
+            return back_slot * block_size + static_cast<size_type>(M_finish._last - M_finish._cur) - 1;
         }
 
         constexpr size_type M_max_size() const noexcept {
@@ -257,17 +256,17 @@ namespace mystl {
             return alloc_limit < diff_limit ? alloc_limit : diff_limit;
         }
 
-        pointer M_allocate_node() {
+        constexpr pointer M_allocate_node() {
             if (block_size > Traits::max_size(M_allocator))
                 throw mystl::length_error("deque block exceeds allocator max_size()");
             return Traits::allocate(M_allocator, block_size);
         }
-        void M_deallocate_node(pointer p) noexcept {
+        constexpr void M_deallocate_node(pointer p) noexcept {
             if (p) Traits::deallocate(M_allocator, p, block_size);
         }
 
         // Valid only for an uninitialized/moved-from base. Allocates no T objects.
-        void M_initialize_map(size_type n) {
+        constexpr void M_initialize_map(size_type n) {
             assert(M_map == nullptr);
             const size_type limit = M_map_limit();
             if (n > M_max_size() || limit < 3)
@@ -298,14 +297,14 @@ namespace mystl {
         // Reserve pointer slots only, not element blocks. On success map growth
         // may invalidate iterators, never element addresses. On failure no change.
         // Future insertions must also roll back/coordinate any later T construction.
-        void M_reserve_map_at_front(size_type nodes = 1) {
+        constexpr void M_reserve_map_at_front(size_type nodes = 1) {
             M_reserve_map(nodes, true);
         }
-        void M_reserve_map_at_back(size_type nodes = 1) {
+        constexpr void M_reserve_map_at_back(size_type nodes = 1) {
             M_reserve_map(nodes, false);
         }
 
-        void M_reallocate_map(size_type n) {
+        constexpr void M_reallocate_map(size_type n) {
             if (n <= M_map_size) return;
             const size_type limit = M_map_limit();
             if (n > limit) {
@@ -331,7 +330,7 @@ namespace mystl {
         }
 
         // The derived container must destroy all live T objects before calling this.
-        void M_release_storage() noexcept {
+        constexpr void M_release_storage() noexcept {
             if (!M_map) return;
             for (size_type i = 0; i < M_map_size; ++i)
                 M_deallocate_node(M_map[i]);
@@ -342,11 +341,28 @@ namespace mystl {
             M_finish = iterator();
         }
 
+        constexpr void M_swap_data(deque_base& other) noexcept {
+            map_pointer temp_map = M_map;
+            size_type temp_map_size = M_map_size;
+            iterator temp_start = M_start;
+            iterator temp_finish = M_finish;
+
+            M_map = other.M_map;
+            M_map_size = other.M_map_size;
+            M_start = other.M_start;
+            M_finish = other.M_finish;
+
+            other.M_map = temp_map;
+            other.M_map_size = temp_map_size;
+            other.M_start = temp_start;
+            other.M_finish = temp_finish;
+        }
+
     private:
         T_alloc_type M_allocator;
         Map_alloc_type M_map_allocator;
 
-        size_type M_map_limit() const noexcept {
+        constexpr size_type M_map_limit() const noexcept {
             const size_type alloc_limit = Map_Traits::max_size(M_map_allocator);
             const size_type diff_limit = static_cast<size_type>(
                 (std::numeric_limits<difference_type>::max)()) / block_size;
@@ -538,6 +554,34 @@ namespace mystl {
             range_assign(first, last, iter_category<Input_Iterator>{});
         }
 
+        constexpr void assign(initializer_list<value_type> list) {
+            range_assign(list.begin(), list.end(), list.size());
+        }
+
+        constexpr deque& operator=(const deque& other) {
+            if (this != &other){
+                if constexpr (Allocator_traits::propagate_on_container_copy_assignment::value) {
+                    if (get_T_allocator() != other.get_T_allocator()) {
+                        clear();
+                    }
+                    // Propagation is required even when the allocators compare equal.
+                    get_T_allocator() = other.get_T_allocator();
+                }
+                assign(ohter.begin(), other.end());
+            }
+            return *this;
+        }
+
+        constexpr deque& operator=(deque&& other)
+        noexcept(Allocator_traits::propagate_on_container_move_assignment::value ||
+            Allocator_traits::is_always_equal::value) 
+        {
+            if (this != &other) {
+                move_assign(mystl::move(other), typename Allocator_traits::propagate_on_container_move_assignment{});
+            }
+            return *this;
+        }
+
         // *************************************************************************************
         // capacity
         [[nodiscard]] constexpr bool empty() const noexcept {
@@ -561,7 +605,7 @@ namespace mystl {
         constexpr void clear() noexcept {
             if (empty()) return;
             mystl::destroy_a(M_start, M_finish, get_T_allocator());
-            const size_type mid = (M_map_size - 1) / 2;
+            size_type mid = (M_map_size - 1) / 2;
             const size_type front = M_start._node - M_map;
             const size_type back = M_finish._node - M_map;
             if (front > mid) {
@@ -584,93 +628,179 @@ namespace mystl {
 
     private:
 
-        constexpr void fill_assign(size_type count, const value_type& value) {
-            if (count > max_size()){
-                throw mystl::length_error("cannot create deque larger than max_size()");
-            }
-            const size_type full_size = Base::M_map_size * block_size - 1;
-            if (count > full_size){
-                Base::M_reallocate_map((count / block_size) + 1);
-                fill_assign_impl(count, value);
-            }else if (count > size()){
-                fill_assign_impl(count, value);
-            }else{
-                const size_type redundant_count = size() - count;
-                const size_type front_redundant = ((full_size - count) / 2 > Base::M_get_front_slot())
-                                                    ? min(redundant_count, ((full_size - count) / 2 - Base::M_get_front_slot())) : 0;
-                const size_type back_redundant = redundant_count - front_redundant;
-                iterator new_start = M_start + front_redundant;
-                iterator new_finish = M_finish - back_redundant;
+        // Owns only blocks added outside the old active range. The map must not
+        // move while this guard is alive. Recording successful allocations uses
+        // indices only, so bookkeeping cannot throw after allocating a block.
+        struct Guard_nodes {
+            deque& owner;
+            size_type front_first;
+            const size_type front_last;
+            const size_type back_first;
+            size_type back_last;
+            bool active = true;
 
-                mystl::fill(new_start, new_finish, value);
+            explicit Guard_nodes(deque& d) noexcept
+                : owner(d), front_first(d.M_start._node - d.M_map),
+                  front_last(front_first), back_first(d.M_finish._node - d.M_map + 1),
+                  back_last(back_first) {}
+
+            Guard_nodes(const Guard_nodes&) = delete;
+            Guard_nodes& operator=(const Guard_nodes&) = delete;
+            Guard_nodes(Guard_nodes&&) = delete;
+            Guard_nodes& operator=(Guard_nodes&&) = delete;
+
+            ~Guard_nodes() noexcept {
+                if (!active) return;
+                for (size_type i = front_first; i < front_last; ++i) {
+                    owner.M_deallocate_node(owner.M_map[i]);
+                    owner.M_map[i] = nullptr;
+                }
+                for (size_type i = back_first; i < back_last; ++i) {
+                    owner.M_deallocate_node(owner.M_map[i]);
+                    owner.M_map[i] = nullptr;
+                }
+            }
+
+            void allocate(size_type front_nodes, size_type back_nodes) {
+                assert(front_nodes <= front_first);
+                assert(back_nodes <= owner.M_map_size - back_last);
+                for (size_type i = 0; i < front_nodes; ++i) {
+                    const size_type index = front_first - 1;
+                    assert(owner.M_map[index] == nullptr);
+                    owner.M_map[index] = owner.M_allocate_node();
+                    front_first = index;
+                }
+                for (size_type i = 0; i < back_nodes; ++i) {
+                    assert(owner.M_map[back_last] == nullptr);
+                    owner.M_map[back_last] = owner.M_allocate_node();
+                    ++back_last;
+                }
+            }
+            void release() noexcept { active = false; }
+        };
+
+        // Tracks exactly the objects whose construction has completed. Declare
+        // object guards AFTER the block guard: objects must be destroyed first.
+        struct Guard_objects {
+            T_alloc_type& alloc;
+            iterator first;
+            iterator last;
+
+            Guard_objects(T_alloc_type& a, iterator begin) noexcept
+                : alloc(a), first(begin), last(begin) {}
+
+            Guard_objects(const Guard_objects&) = delete;
+            Guard_objects& operator=(const Guard_objects&) = delete;
+            Guard_objects(Guard_objects&&) = delete;
+            Guard_objects& operator=(Guard_objects&&) = delete;
+
+            ~Guard_objects() noexcept {
+                while (last != first) {
+                    --last;
+                    Allocator_traits::destroy(alloc, last.operator->());
+                }
+            }
+            void fill_until(iterator end, const value_type& value) {
+                while (last != end) {
+                    Allocator_traits::construct(alloc, last.operator->(), value);
+                    ++last;
+                }
+            }
+            template <typename Input_Iterator>
+            void range_assign_until(Input_Iterator first, iterator end) {
+                while (last != end) {
+                    Allocator_traits::construct(alloc, last.operator->(), *first);
+                    ++last;
+                }
+            }
+            void release() noexcept { first = last; }
+        };
+
+        // fill assign
+        constexpr void fill_assign(size_type count, const value_type& value) {
+            if (count > max_size())
+                throw mystl::length_error("cannot create deque larger than max_size()");
+            if (count == 0) {
+                clear();
+                return;
+            }
+            // value may refer to an element that this operation assigns/destroys.
+            const value_type stable(value);
+            if (!M_map) Base::M_initialize_map(0);
+
+            size_type full_size = M_map_size * block_size - 1;
+            if (count > full_size) {
+                Base::M_reallocate_map(count / block_size + 1);
+                full_size = M_map_size * block_size - 1;
+            }
+            if (count > size()) {
+                fill_assign_impl(count, stable);
+            } else {
+                const size_type redundant_count = size() - count;
+                const size_type front_empty = Base::M_get_front_empty_position();
+                const size_type desired_front = (full_size - count) / 2;
+                const size_type front_redundant = desired_front > front_empty
+                    ? mystl::min(redundant_count, desired_front - front_empty) : 0;
+                const size_type back_redundant = redundant_count - front_redundant;
+                iterator new_start = M_start + static_cast<difference_type>(front_redundant);
+                iterator new_finish = M_finish - static_cast<difference_type>(back_redundant);
+
+                // No lifetimes end until all potentially throwing assignments finish.
+                mystl::fill(new_start, new_finish, stable);
                 mystl::destroy_a(M_start, new_start, get_T_allocator());
                 mystl::destroy_a(new_finish, M_finish, get_T_allocator());
-                for (size_type i = M_start._node - M_map; i < (new_start._node - M_map); ++i) {
+                for (size_type i = M_start._node - M_map; i < size_type(new_start._node - M_map); ++i) {
+                    Base::M_deallocate_node(M_map[i]);
                     M_map[i] = nullptr;
                 }
-                for (size_type i = new_finish._node - M_map + 1; i <= (M_finish._node - M_map); ++i) {
+                for (size_type i = new_finish._node - M_map + 1; i <= size_type(M_finish._node - M_map); ++i) {
+                    Base::M_deallocate_node(M_map[i]);
                     M_map[i] = nullptr;
                 }
-                
                 M_start = new_start;
                 M_finish = new_finish;
             }
         }
 
-        constexpr void fill_assign_impl(size_type count, const value_type& value){
-            const size_type full_size = Base::M_map_size * block_size - 1;
+        constexpr void fill_assign_impl(size_type count, const value_type& value) {
+            // The caller has already prepared a map large enough for count. Plan
+            // both ends before allocating anything; never relocate the map while
+            // the guards hold indices or iterators into it.
             const size_type front_empty = Base::M_get_front_empty_position();
             const size_type back_empty = Base::M_get_back_empty_position();
-            const size_type extra_count = count - size()
-            const size_type front_extra = (front_empty > (front_empty + back_empty - extra_count) / 2)
-                                            ? (front_empty - (front_empty + back_empty - extra_count) / 2) : 0;
+            const size_type extra_count = count - size();
+            assert(extra_count <= front_empty + back_empty);
+            const size_type desired_front = (front_empty + back_empty - extra_count) / 2;
+            const size_type front_extra = front_empty > desired_front
+                ? mystl::min(extra_count, front_empty - desired_front) : 0;
             const size_type back_extra = extra_count - front_extra;
-            allocate_and_uninitialize_fill(front_extra, value, true);
-            mystl::fill(M_start, M_finish, value);
-            allocate_and_uninitialize_fill(back_extra, value, false);
-            M_start -= front_extra;
-            M_finish += back_extra;
-        }
 
-        constexpr void allocate_and_uninitialize_fill(size_type count, const value_type& value, bool at_front) {
-            vector<size_type> new_allocate_nodes;
-            try {
-                if (at_front) {
-                    const size_type offset = static_cast<size_type>(M_start._cur - M_start._first);
-                    const size_type remaining = count > offset ? count - offset : 0;
-                    const size_type cur_start = M_start._node - M_map;
-                    const size_type front_nodes = (remaining == 0 ? 0 : (remaining + block_size - 1) / block_size);
-                    Base::M_reserve_map_at_front(front_nodes);
-                    const size_type new_start = cur_start - front_nodes
-                    for (; new_start <= cur_start; ++new_start) {
-                        if (!M_map[new_start]) {
-                            M_map[new_start] = Base::M_allocate_node();
-                            new_allocate_nodes.emplace_back(new_start);
-                        }
-                    }
-                }else {
-                    const offset = static_cast<size_type>(M_finish._last - M_finish._cur);
-                    const size_type cur_finish = M_finish._node - M_map;
-                    const size_type back_nodes = count / block_size + (offset + count % block_size) / block_size;
-                    Base::M_reserve_map_at_back(back_nodes);
-                    const size_type new_finish = cur_finish + back_nodes;
-                    for (; cur_finish <= new_finish; ++cur_finish) {
-                        if (!M_map[cur_finish]) {
-                            M_map[cur_finish] = Base::M_allocate_node();
-                            new_allocate_nodes.emplace_back(cur_finish);
-                        }
-                    }
-                }
-            } catch (...) {
-                for (pointer node: new_allocate_nodes)
-                    M_deallocate_node(Base::M_map[node]);
-                throw;
-            }
-            if (at_front) {
-                mystl::uninitialized_fill_a(M_start - count, M_start, value, get_T_allocator());
-            }else {
-                mystl::uninitialized_fill_a(M_finish, M_finish + count, value, get_T_allocator());
-            }
+            const size_type front_offset = M_start._cur - M_start._first;
+            const size_type remaining = front_extra > front_offset ? front_extra - front_offset : 0;
+            const size_type front_nodes = remaining / block_size + (remaining % block_size != 0);
+            const size_type back_offset = M_finish._cur - M_finish._first;
+            const size_type back_nodes = back_extra / block_size
+                + (back_offset + back_extra % block_size) / block_size;
+
+            Guard_nodes nodes(*this);
+            nodes.allocate(front_nodes, back_nodes);
+
+            iterator new_start = M_start - static_cast<difference_type>(front_extra);
+            iterator new_finish = M_finish + static_cast<difference_type>(back_extra);
+
+            Guard_objects head(get_T_allocator(), new_start);
+            Guard_objects tail(get_T_allocator(), M_finish);
+
+            head.fill_until(M_start, value);
+            mystl::fill(M_start, M_finish, value);
+            tail.fill_until(new_finish, value);
+
+            // Commit only after every construction and assignment has succeeded.
+            M_start = new_start;
+            M_finish = new_finish;
+            head.release();
+            tail.release();
+            nodes.release();
         }
 
         template <typename Input_Iterator>
@@ -681,6 +811,7 @@ namespace mystl {
             }
         }
 
+        // range assign
         template <typename Forward_Iterator>
         constexpr void range_assign(Forward_Iterator first, Forward_Iterator last, forward_iterator_tag) {
             const size_type n = mystl::distance(first, last);
@@ -693,10 +824,104 @@ namespace mystl {
                 clear();
                 return;
             }
+            const size_type full_size = M_map_size * block_size - 1;
+            if (n > full_size) {
+                Base::M_reallocate_map(count / block_size + 1);
+                full_size = M_map_size * block_size - 1;
+            }
+            if (count > size()) {
+                range_assign_impl(first, last, n);
+            } else {
+                const size_type redundant_count = size() - count;
+                const size_type front_empty = Base::M_get_front_empty_position();
+                const size_type desired_front = (full_size - count) / 2;
+                const size_type front_redundant = desired_front > front_empty
+                    ? mystl::min(redundant_count, desired_front - front_empty) : 0;
+                const size_type back_redundant = redundant_count - front_redundant;
+                iterator new_start = M_start + static_cast<difference_type>(front_redundant);
+                iterator new_finish = M_finish - static_cast<difference_type>(back_redundant);
 
+                // No lifetimes end until all potentially throwing assignments finish.
+                mystl::copy(first, last, new_start);
+                mystl::destroy_a(M_start, new_start, get_T_allocator());
+                mystl::destroy_a(new_finish, M_finish, get_T_allocator());
+                for (size_type i = M_start._node - M_map; i < size_type(new_start._node - M_map); ++i) {
+                    Base::M_deallocate_node(M_map[i]);
+                    M_map[i] = nullptr;
+                }
+                for (size_type i = new_finish._node - M_map + 1; i <= size_type(M_finish._node - M_map); ++i) {
+                    Base::M_deallocate_node(M_map[i]);
+                    M_map[i] = nullptr;
+                }
+                M_start = new_start;
+                M_finish = new_finish;
+            }
         }
 
+        template <typename Iterator>
+        constexpr void range_assign_impl(Iterator first, Iterator last, size_type n) {
+            const size_type front_empty = Base::M_get_front_empty_position();
+            const size_type back_empty = Base::M_get_back_empty_position();
+            const size_type extra_count = count - size();
+            assert(extra_count <= front_empty + back_empty);
+            const size_type desired_front = (front_empty + back_empty - extra_count) / 2;
+            const size_type front_extra = front_empty > desired_front
+                ? mystl::min(extra_count, front_empty - desired_front) : 0;
+            const size_type back_extra = extra_count - front_extra;
 
+            const size_type front_offset = M_start._cur - M_start._first;
+            const size_type remaining = front_extra > front_offset ? front_extra - front_offset : 0;
+            const size_type front_nodes = remaining / block_size + (remaining % block_size != 0);
+            const size_type back_offset = M_finish._cur - M_finish._first;
+            const size_type back_nodes = back_extra / block_size
+                + (back_offset + back_extra % block_size) / block_size;
+
+            Guard_nodes nodes(*this);
+            nodes.allocate(front_nodes, back_nodes);
+
+            iterator new_start = M_start - static_cast<difference_type>(front_extra);
+            iterator new_finish = M_finish + static_cast<difference_type>(back_extra);
+
+            Guard_objects head(get_T_allocator(), new_start);
+            Guard_objects tail(get_T_allocator(), M_finish);
+
+            auto it1 = first;
+            auto it2 = first;
+            mystl::advance(it1, front_extra);
+            mystl::advance(it2, front_extra + size());
+
+            head.range_assign_until(first, M_start);
+            mystl::copy(it1, it2, M_start);
+            tail.range_assign_until(it2, new_finish);
+
+            M_start = new_start;
+            M_finish = new_finish;
+            head.release();
+            tail.release();
+            nodes.release();
+        }
+
+        // move assign
+        constexpr void move_assign(vector&& other, true_type) {
+            get_T_allocator() = mystl::move(other.get_T_allocator());
+            Base::M_release_storage();
+            Base::M_swap_data(other);
+        }
+
+        constexpr void move_assign(vector&& other, false_type) {
+            if (get_T_allocator() == other.get_T_allocator()) {
+                Base::M_release_storage();
+                Base::M_swap_data(other);
+            }else {
+                range_move_assign(other.begin(), other.end(), other.size());
+                other.M_release_storage();
+            }
+        }
+
+        template <
+        constexpr void range_move_assign()
+
+        // initialize
         constexpr void default_initialize(size_type n) {
             uninitialized_default_construct_n_a(M_start, n, get_T_allocator());
         }
@@ -727,6 +952,7 @@ namespace mystl {
             uninitialized_copy_a(first, last, M_start, get_T_allocator());
         }
 
+        // length helper
         static constexpr size_type check_init_len(const size_type n, const T_alloc_type& alloc) {
             if (n > get_max_size(alloc)) {
                 throw mystl::length_error("cannot create deque larger than max_size()");

@@ -1164,8 +1164,8 @@ namespace mystl {
             }
         }
 
-        template <typename Input_Iterator>
-        constexpr void range_move_assign(Input_Iterator first, Input_Iterator last, forward_iterator_tag) {
+        template <typename Forward_Iterator>
+        constexpr void range_move_assign(Forward_Iterator first, Forward_Iterator last, forward_iterator_tag) {
             const size_type n = mystl::distance(first, last);
             range_move_assign(first, last, n);
         }
