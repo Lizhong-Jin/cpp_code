@@ -368,7 +368,7 @@ namespace mystl {
             for (size_type i = 0; i < n; ++i) {
                 M_map[front + i] = nullptr;
             }
-            M_start = iterator(M_map + first + n, M_start._cur - M_start._first);
+            M_start = iterator(M_map + front + n, M_start._cur - M_start._first);
             M_finish = iterator(M_map + second, M_finish._cur - M_finish._first);
         }
 
@@ -823,16 +823,16 @@ namespace mystl {
             void range_assign_until(Input_Iterator first, iterator end) {
                 while (last != end) {
                     Allocator_traits::construct(alloc, last.operator->(), *first);
-                    ++first;
                     ++last;
+                    ++first;
                 }
             }
             template <typename Input_Iterator>
             void range_move_assign_until(Input_Iterator first, iterator end) {
                 while (last != end) {
                     Allocator_traits::construct(alloc, last.operator->(), mystl::move(*first));
-                    ++first;
                     ++last;
+                    ++first;
                 }
             }
 
@@ -868,15 +868,18 @@ namespace mystl {
         // emplace_back
         template <typename... Args>
         constexpr reference emplace_back(Args&&... args) {
+            if (size() >= max_size()) {
+                throw mystl::length_error("deque cannot be larger than max_size()");
+            }
+            if (!M_map) Base::M_initialize_map(0);
             if (Base::M_get_back_empty_position() == 0){
-                const size_type full_size = M_map_size * block_size - 1;
-                if (full_size >= max_size())
+                if (M_map_size >= Base::M_map_limit())
                     throw mystl::length_error("deque cannot be larger than max_size()");
                 Base::M_reserve_map_at_back();
             }
 
-            Allocator_traits::construct(get_T_allocator(), M_finish, mystl::forward<Args>(args)...);
-            if (M_finish._cur == M_finish._last) {
+            Allocator_traits::construct(get_T_allocator(), M_finish.operator->(), mystl::forward<Args>(args)...);
+            if (M_finish._cur == M_finish._last - 1) {
                 size_type next_back = M_finish._node - M_map + 1;
                 M_map[next_back] = Base::M_allocate_node();
             }
@@ -895,19 +898,22 @@ namespace mystl {
 
         // emplace_front
         template <typename... Args>
-        constexpr reference emplace_back(Args&&... args) {
+        constexpr reference emplace_front(Args&&... args) {
+            if (size() >= max_size()) {
+                throw mystl::length_error("deque cannot be larger than max_size()");
+            }
+            if (!M_map) Base::M_initialize_map(0);
             if (Base::M_get_front_empty_position() == 0){
-                const size_type full_size = M_map_size * block_size - 1;
-                if (full_size >= max_size())
+                if (M_map_size >= Base::M_map_limit())
                     throw mystl::length_error("deque cannot be larger than max_size()");
                 Base::M_reserve_map_at_front();
             }
-
-            Allocator_traits::construct(get_T_allocator(), M_start, mystl::forward<Args>(args)...);
+ 
             if (M_start._cur == M_start._first) {
                 size_type next_front = M_start._node - M_map - 1;
                 M_map[next_front] = Base::M_allocate_node();
             }
+            Allocator_traits::construct(get_T_allocator(), (M_start - 1).operator->(), mystl::forward<Args>(args)...);
             --M_start;
             return front();
         }
@@ -924,112 +930,135 @@ namespace mystl {
         // pop_back & pop_front
         constexpr void pop_back() {
             assert(!empty());
+            Allocator_traits::destroy(get_T_allocator(), (M_finish - 1).operator->());
             if (M_finish._cur == M_finish._first) {
-                Base::M_deallocate_node(M_finish._node);
+                Base::M_deallocate_node(M_map[M_finish._node - M_map]);
+                M_map[M_finish._node - M_map] = nullptr;
             }
             --M_finish;
-            Allocator_traits::destroy(get_T_allocator(), M_finish);
         }
 
         constexpr void pop_front() {
             assert(!empty());
-            if (M_start._cur == M_start._last) {
-                Base::M_deallocate_node(M_start._node);
-            }
-            Allocator_traits::destroy(get_T_allocator(), M_start);
+            Allocator_traits::destroy(get_T_allocator(), M_start.operator->());
+            if (M_start._cur == M_start._last - 1) {
+                Base::M_deallocate_node(M_map[M_start._node - M_map]);
+                M_map[M_start._node - M_map] = nullptr;
+            }  
             ++M_start;
         }
 
         // emplace
     private:
         template <typename... Args>
-        constexpr iterator move_front_and_emplace(const_iterator pos, Args&&... Args) {
+        constexpr iterator move_front_and_emplace(const_iterator pos, Args&&... args) {
             if (M_start._cur == M_start._first) {
                 M_map[M_start._node - M_map - 1] = Base::M_allocate_node();
             }
             if (pos == M_start - 1) {
-                Allocator_traits::construct(get_T_allocator(), M_start - 1, mystl::forward<Args>(args)...);
+                Allocator_traits::construct(get_T_allocator(), (M_start - 1).operator->(), mystl::forward<Args>(args)...);
                 --M_start;
                 return M_start;
             }
             value_type insert_obj(mystl::forward<Args>(args)...);
+            const size_type n = pos - M_start;
+            iterator insert_pos = M_start + n;
 
             if constexpr (is_nothrow_move_constructible_v<value_type> || !is_copy_constructible_v<value_type>){
-                Allocator_traits::construct(get_T_allocator(), M_start - 1, mystl::move(*M_start));
+                Allocator_traits::construct(get_T_allocator(), (M_start - 1).operator->(), mystl::move(*M_start));
             }else {
-                Allocator_traits::construct(get_T_allocator(), M_start - 1, *M_start);
+                Allocator_traits::construct(get_T_allocator(), (M_start - 1).operator->(), *M_start);
             }
             --M_start;
             if constexpr (is_nothrow_move_assignable_v<value_type> || !is_copy_assignable_v<value_type>){
-                mystl::move(M_start + 1, pos + 1, M_start);
+                mystl::move(M_start + 1, insert_pos + 1, M_start);
             }else {
-                mystl::copy(M_start + 1, pos + 1, M_start);
+                mystl::copy(M_start + 1, insert_pos + 1, M_start);
             }
             if constexpr (is_nothrow_move_assignable_v<value_type> || !is_copy_assignable_v<value_type>) {
-                *pos = mystl::move(insert_obj);
+                *insert_pos = mystl::move(insert_obj);
             } else {
-                *pos = insert_obj;
+                *insert_pos = insert_obj;
             }
-            return pos;
+            return insert_pos;
         }
 
         template <typename... Args>
-        constexpr iterator move_back_and_emplac(const_iterator pos, Args&&... Args) {
-            if (M_finish._cur == M_finish._last) {
+        constexpr iterator move_back_and_emplace(const_iterator pos, Args&&... args) {
+            if (M_finish._cur == M_finish._last - 1) {
                 M_map[M_finish._node - M_map + 1] = Base::M_allocate_node();
             }
             if (pos == M_finish) {
-                Allocator_traits::construct(get_T_allocator(), M_finish, mystl::forward<Args>(args)...);
+                Allocator_traits::construct(get_T_allocator(), M_finish.operator->(), mystl::forward<Args>(args)...);
                 ++M_finish;
                 return M_finish - 1;
             }
             value_type insert_obj(mystl::forward<Args>(args)...);
+            const size_type n = pos - M_start;
+            iterator insert_pos = M_start + n;
 
             if constexpr (is_nothrow_move_constructible_v<value_type> || !is_copy_constructible_v<value_type>){
-                Allocator_traits::construct(get_T_allocator(), M_finish, mystl::move(*(M_finish - 1)));
+                Allocator_traits::construct(get_T_allocator(), M_finish.operator->(), mystl::move(*(M_finish - 1)));
             }else {
-                Allocator_traits::construct(get_T_allocator(), M_finish, *(M_finish - 1));
+                Allocator_traits::construct(get_T_allocator(), M_finish.operator->(), *(M_finish - 1));
             }
             ++M_finish;
             if constexpr (is_nothrow_move_assignable_v<value_type> || !is_copy_assignable_v<value_type>){
-                mystl::move_backward(pos, M_finish - 2, M_finish - 1);
+                mystl::move_backward(insert_pos, M_finish - 2, M_finish - 1);
             }else {
-                mystl::copy_backward(pos, M_finish - 2, M_finish - 1);
+                mystl::copy_backward(insert_pos, M_finish - 2, M_finish - 1);
             }
             if constexpr (is_nothrow_move_assignable_v<value_type> || !is_copy_assignable_v<value_type>) {
-                *pos = mystl::move(insert_obj);
+                *insert_pos = mystl::move(insert_obj);
             } else {
-                *pos = insert_obj;
+                *insert_pos = insert_obj;
             }
-            return pos;
+            return insert_pos;
         }
 
     public:
         template <typename... Args>
-        constexpr iterator emplace(const_iterator pos, Args&&... Args) {
+        constexpr iterator emplace(const_iterator pos, Args&&... args) {
+            if (!M_map) {
+                assert(pos == M_start);
+                Base::M_initialize_map(0);
+                return emplace_back(mystl::forward<Args>(args)...);
+            }
             assert(pos >= M_start && pos <= M_finish);
             const size_type first = pos - M_start;
+            iterator insert_pos;
             if (first <= size() / 2) {
                 if (Base::M_get_front_empty_position() > 0) {
-                    move_front_and_emplace(pos, mystl::forward<Args>(args)...);
+                    insert_pos = move_front_and_emplace(pos, mystl::forward<Args>(args)...);
                 }else if (Base::M_get_back_slot() > 0) {
                     const size_type tatal_slot = Base::M_get_back_slot();
                     Base::M_shift_map_right((tatal_slot + 1) / 2);
-                    move_front_and_emplace(pos, mystl::forward<Args>(args)...);
+                    insert_pos = M_start + first;
+                    insert_pos = move_front_and_emplace(insert_pos, mystl::forward<Args>(args)...);
                 }else {
-                    throw mystl::length_error("no extra space available for emplace");
+                    if (M_map_size >= Base::M_map_limit())
+                        throw mystl::length_error("no extra space available for emplace");
+                    Base::M_reserve_map_at_front();
+                    insert_pos = M_start + first;
+                    insert_pos = move_front_and_emplace(insert_pos, mystl::forward<Args>(args)...);
                 }
             }else {
                 if (Base::M_get_back_empty_position() > 0) {
-                    move_back_and_emplace(pos, mystl::forward<Args>(args)...);
+                    insert_pos = move_back_and_emplace(pos, mystl::forward<Args>(args)...);
                 }else if (Base::M_get_front_slot() > 0) {
                     const size_type tatal_slot = Base::M_get_front_slot();
                     Base::M_shift_map_left((tatal_slot + 1) / 2);
-                    move_back_and_emplace(pos, mystl::forward<Args>(args)...);
+                    insert_pos = M_start + first;
+                    insert_pos = move_back_and_emplace(insert_pos, mystl::forward<Args>(args)...);
                 }else {
-                    throw mystl::length_error("no extra space available for emplace");
+                    if (M_map_size >= Base::M_map_limit())
+                        throw mystl::length_error("no extra space available for emplace");
+                    Base::M_reserve_map_at_back();
+                    insert_pos = M_start + first;
+                    insert_pos = move_back_and_emplace(insert_pos, mystl::forward<Args>(args)...);
                 }
             }
+            return insert_pos;
         }
 
         // insert
@@ -1250,7 +1279,7 @@ namespace mystl {
                 Base::M_swap_data(other);
             }else {
                 range_move_assign(other.begin(), other.end(), other.size());
-                mystl::destroy_a(other.M_start, other.M_finish, get_T_allocator());
+                mystl::destroy_a(other.M_start, other.M_finish, other.get_T_allocator());
                 other.M_release_storage();
             }
         }
