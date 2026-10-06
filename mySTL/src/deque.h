@@ -401,6 +401,22 @@ namespace mystl {
             other.M_finish = temp_finish;
         }
 
+        constexpr bool M_allocators_equal(const deque_base& other) const {
+            return M_allocator == other.M_allocator && M_map_allocator == other.M_map_allocator;
+        }
+
+        constexpr void M_copy_allocators(const deque_base& other) {
+            assert(!M_map || M_allocators_equal(other));
+            M_allocator = other.M_allocator;
+            M_map_allocator = other.M_map_allocator;
+        }
+
+        constexpr void M_move_allocators(deque_base& other) {
+            assert(!M_map);
+            M_allocator = mystl::move(other.M_allocator);
+            M_map_allocator = mystl::move(other.M_map_allocator);
+        }
+
     private:
         T_alloc_type M_allocator;
         Map_alloc_type M_map_allocator;
@@ -604,12 +620,12 @@ namespace mystl {
         constexpr deque& operator=(const deque& other) {
             if (this != &other){
                 if constexpr (Allocator_traits::propagate_on_container_copy_assignment::value) {
-                    if (get_T_allocator() != other.get_T_allocator()) {
+                    if (!Base::M_allocators_equal(other)) {
                         mystl::destroy_a(M_start, M_finish, get_T_allocator());
                         Base::M_release_storage();
                     }
                     // Propagation is required even when the allocators compare equal.
-                    get_T_allocator() = other.get_T_allocator();
+                    Base::M_copy_allocators(other);
                 }
                 assign(other.begin(), other.end());
             }
@@ -926,22 +942,26 @@ namespace mystl {
         // pop_back & pop_front
         constexpr void pop_back() {
             assert(!empty());
-            Allocator_traits::destroy(get_T_allocator(), (M_finish - 1).operator->());
-            if (M_finish._cur == M_finish._first) {
-                Base::M_deallocate_node(M_map[M_finish._node - M_map]);
-                M_map[M_finish._node - M_map] = nullptr;
-            }
+            const bool cross_block = M_finish._cur == M_finish._first;
+            const size_type old_slot = M_finish._node - M_map;
             --M_finish;
+            Allocator_traits::destroy(get_T_allocator(), M_finish.operator->());
+            if (cross_block) {
+                Base::M_deallocate_node(M_map[old_slot]);
+                M_map[old_slot] = nullptr;
+            }
         }
 
         constexpr void pop_front() {
             assert(!empty());
+            const bool cross_block = M_start._cur == M_start._last - 1;
+            const size_type old_slot = M_start._node - M_map;
             Allocator_traits::destroy(get_T_allocator(), M_start.operator->());
-            if (M_start._cur == M_start._last - 1) {
-                Base::M_deallocate_node(M_map[M_start._node - M_map]);
-                M_map[M_start._node - M_map] = nullptr;
-            }  
             ++M_start;
+            if (cross_block) {
+                Base::M_deallocate_node(M_map[old_slot]);
+                M_map[old_slot] = nullptr;
+            }
         }
 
         // emplace
@@ -975,8 +995,8 @@ namespace mystl {
             }
 
             --M_start;
-            nodes.release();
             head.release();
+            nodes.release();
             return insert_pos;
         }
 
@@ -990,12 +1010,13 @@ namespace mystl {
             Guard_nodes nodes(*this);
             nodes.allocate(0, cross_block ? 1 : 0);
 
-            Guard_objects tail(get_T_allocator(), M_finish); 
+            const iterator new_finish = M_finish + 1;
+            Guard_objects tail(get_T_allocator(), M_finish);
 
             if constexpr (is_nothrow_move_constructible_v<value_type> || !is_copy_constructible_v<value_type>){
-                tail.range_move_assign_until(M_finish - 1, M_finish);
+                tail.range_move_assign_until(M_finish - 1, new_finish);
             }else {
-                tail.range_assign_until(M_finish - 1, M_finish);
+                tail.range_assign_until(M_finish - 1, new_finish);
             }
             if constexpr (is_nothrow_move_assignable_v<value_type> || !is_copy_assignable_v<value_type>){
                 mystl::move_backward(insert_pos, M_finish - 1, M_finish);
@@ -1008,9 +1029,9 @@ namespace mystl {
                 *insert_pos = insert_obj;
             }
 
-            ++M_finish;
-            nodes.release();
+            M_finish = new_finish;
             tail.release();
+            nodes.release();
             return insert_pos;
         }
 
@@ -1046,8 +1067,6 @@ namespace mystl {
                     insert_pos = M_start + first;
                     insert_pos = move_front_and_emplace(insert_pos, mystl::forward<Args>(args)...);
                 }else {
-                    if (M_map_size >= Base::M_map_limit())
-                        throw mystl::length_error("no extra space available for emplace");
                     Base::M_reserve_map_at_front();
                     insert_pos = M_start + first;
                     insert_pos = move_front_and_emplace(insert_pos, mystl::forward<Args>(args)...);
@@ -1061,8 +1080,6 @@ namespace mystl {
                     insert_pos = M_start + first;
                     insert_pos = move_back_and_emplace(insert_pos, mystl::forward<Args>(args)...);
                 }else {
-                    if (M_map_size >= Base::M_map_limit())
-                        throw mystl::length_error("no extra space available for emplace");
                     Base::M_reserve_map_at_back();
                     insert_pos = M_start + first;
                     insert_pos = move_back_and_emplace(insert_pos, mystl::forward<Args>(args)...);
@@ -1276,14 +1293,14 @@ namespace mystl {
 
         // move assign
         constexpr void move_assign(deque&& other, true_type) {
-            get_T_allocator() = mystl::move(other.get_T_allocator());
             mystl::destroy_a(M_start, M_finish, get_T_allocator());
             Base::M_release_storage();
+            Base::M_move_allocators(other);
             Base::M_swap_data(other);
         }
 
         constexpr void move_assign(deque&& other, false_type) {
-            if (get_T_allocator() == other.get_T_allocator()) {
+            if (Base::M_allocators_equal(other)) {
                 mystl::destroy_a(M_start, M_finish, get_T_allocator());
                 Base::M_release_storage();
                 Base::M_swap_data(other);

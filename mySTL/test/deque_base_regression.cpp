@@ -3,9 +3,11 @@
 #include <cstdio>
 #include <cstdint>
 #include <cstdlib>
+#include <deque>
 #include <limits>
 #include <map>
 #include <memory>
+#include <random>
 #include <stdexcept>
 #include <type_traits>
 #include <utility>
@@ -589,6 +591,311 @@ void test_assign_sequences() {
     Audit::clean();
 }
 
+// Audit both the allocator that releases storage and the allocator that ends
+// each object's lifetime (including the map's pointer objects).
+struct AssignmentAudit {
+    static inline std::map<void*, int> objects;
+};
+
+template <class T, bool Copy, bool Move>
+struct AssignmentAllocator : OwnerAllocator<T> {
+    using propagate_on_container_copy_assignment = mystl::bool_constant<Copy>;
+    using propagate_on_container_move_assignment = mystl::bool_constant<Move>;
+    template <class U> struct rebind { using other = AssignmentAllocator<U, Copy, Move>; };
+    int tag = 0; // Propagation is observable even when owner IDs compare equal.
+    AssignmentAllocator() = default;
+    AssignmentAllocator(int owner, int state = 0) : OwnerAllocator<T>(owner), tag(state) {}
+    AssignmentAllocator(const AssignmentAllocator&) = default;
+    template <class U>
+    AssignmentAllocator(const AssignmentAllocator<U, Copy, Move>& a)
+        : OwnerAllocator<T>(a.owner), tag(a.tag) {}
+    AssignmentAllocator& operator=(const AssignmentAllocator& a) noexcept {
+        this->owner = a.owner;
+        tag = a.tag;
+        return *this;
+    }
+    AssignmentAllocator& operator=(AssignmentAllocator&& a) noexcept {
+        this->owner = a.owner;
+        tag = a.tag;
+        a.owner = -1;
+        a.tag = -1;
+        return *this;
+    }
+    template <class U, class... Args>
+    void construct(U* p, Args&&... args) {
+        OwnerAllocator<T>::construct(p, std::forward<Args>(args)...);
+        CHECK(AssignmentAudit::objects.emplace(p, this->owner).second);
+    }
+    template <class U>
+    void destroy(U* p) noexcept {
+        auto it = AssignmentAudit::objects.find(p);
+        CHECK(it != AssignmentAudit::objects.end() && it->second == this->owner);
+        AssignmentAudit::objects.erase(it);
+        OwnerAllocator<T>::destroy(p);
+    }
+};
+
+template <bool Copy, bool Move>
+void test_assignment_propagation() {
+    using Alloc = AssignmentAllocator<GuardElement, Copy, Move>;
+    using D = mystl::deque<GuardElement, Alloc>;
+    for (bool equal : {false, true}) {
+        {
+            const int source_owner = equal ? 1 : 2;
+            D source(130, Alloc(source_owner, 22));
+            D target(3, Alloc(1, 11));
+            for (int i = 0; i < 130; ++i) source[i].value = i;
+            target = source;
+            CHECK(target.get_allocator().owner == (Copy ? source_owner : 1));
+            CHECK(target.get_allocator().tag == (Copy ? 22 : 11));
+            for (int i = 0; i < 130; ++i) CHECK(target[i].value == i && source[i].value == i);
+
+            // A subsequent non-propagating transfer catches a stale map allocator
+            // left behind by copy propagation.
+            D receiver(2, Alloc(target.get_allocator().owner, 33));
+            auto address = target.begin().operator->();
+            receiver = mystl::move(target);
+            CHECK(receiver.begin().operator->() == address && target.empty());
+            CHECK(receiver.get_allocator().tag == (Move ? (Copy ? 22 : 11) : 33));
+            target.emplace_back(7);
+            CHECK(target.size() == 1 && target.front().value == 7);
+            auto* self = &receiver;
+            receiver = *self;
+            receiver = mystl::move(*self);
+            CHECK(receiver.size() == 130 && receiver[129].value == 129);
+        }
+        CHECK(GuardElement::live.empty() && AssignmentAudit::objects.empty());
+        Audit::clean();
+        {
+            D source(130, Alloc(equal ? 1 : 2, 22));
+            D target(3, Alloc(1, 11));
+            for (int i = 0; i < 130; ++i) source[i].value = i;
+            auto address = source.begin().operator->();
+            target = mystl::move(source);
+            CHECK(target.get_allocator().owner == (Move && !equal ? 2 : 1));
+            CHECK(target.get_allocator().tag == (Move ? 22 : 11));
+            CHECK(source.empty() && target.size() == 130);
+            CHECK((target.begin().operator->() == address) == (Move || equal));
+            for (int i = 0; i < 130; ++i) CHECK(target[i].value == i);
+            source.emplace_front(9);
+            CHECK(source.front().value == 9);
+        }
+        CHECK(GuardElement::live.empty() && AssignmentAudit::objects.empty());
+        Audit::clean();
+    }
+}
+
+void test_assignment_failures() {
+    using CopyAlloc = AssignmentAllocator<GuardElement, true, false>;
+    for (int failure = 0; failure < 5; ++failure) {
+        {
+            mystl::deque<GuardElement, CopyAlloc> source(130, CopyAlloc(2));
+            mystl::deque<GuardElement, CopyAlloc> target(3, CopyAlloc(1));
+            if (failure < 3) Audit::allocate_before_throw = failure;
+            else GuardElement::copies_before_throw = failure == 3 ? 0 : 4;
+            bool threw = false;
+            try { target = source; } catch (...) { threw = true; }
+            Audit::allocate_before_throw = GuardElement::copies_before_throw = -1;
+            CHECK(threw && source.size() == 130 && target.empty());
+            CHECK(GuardElement::live.size() == 130 && target.get_allocator().owner == 2);
+            // Both propagated allocators must work after an allocation or
+            // construction failure left the target empty.
+            target.emplace_back(7);
+            CHECK(target.front().value == 7);
+        }
+        CHECK(GuardElement::live.empty() && AssignmentAudit::objects.empty());
+        Audit::clean();
+    }
+    using MoveAlloc = AssignmentAllocator<GuardElement, false, false>;
+    for (bool construction_failure : {false, true}) {
+        {
+            mystl::deque<GuardElement, MoveAlloc> source(130, MoveAlloc(2));
+            mystl::deque<GuardElement, MoveAlloc> target(3, MoveAlloc(1));
+            const auto allocations = Audit::allocations.size();
+            if (construction_failure) GuardElement::copies_before_throw = 0;
+            else GuardElement::assignments_before_throw = 0;
+            bool threw = false;
+            try { target = mystl::move(source); } catch (...) { threw = true; }
+            GuardElement::copies_before_throw = GuardElement::assignments_before_throw = -1;
+            CHECK(threw && source.size() == 130 && target.size() == 3);
+            CHECK(GuardElement::live.size() == 133 && Audit::allocations.size() == allocations);
+            target = mystl::move(source);
+            CHECK(source.empty() && target.size() == 130 && target.get_allocator().owner == 1);
+        }
+        CHECK(GuardElement::live.empty() && AssignmentAudit::objects.empty());
+        Audit::clean();
+    }
+}
+
+void test_insert_guards() {
+    constexpr int B = mystl::deque_block_size<GuardElement>;
+    for (bool front : {false, true}) {
+        for (bool allocation_failure : {false, true}) {
+            {
+                AssignDeque<GuardElement> d(B - 1);
+                const auto allocations = Audit::allocations.size();
+                for (int retry = 0; retry < 2; ++retry) {
+                    if (allocation_failure) Audit::allocate_before_throw = 0;
+                    else Audit::construct_before_throw = 0;
+                    bool threw = false;
+                    try {
+                        if (front) d.emplace_front(9);
+                        else d.emplace_back(9);
+                    } catch (const std::bad_alloc&) { threw = true; }
+                    Audit::allocate_before_throw = Audit::construct_before_throw = -1;
+                    CHECK(threw && d.size() == B - 1 && GuardElement::live.size() == B - 1);
+                    CHECK(Audit::allocations.size() == allocations);
+                }
+                if (front) d.emplace_front(9);
+                else d.emplace_back(9);
+                CHECK(d.size() == B);
+            }
+            CHECK(GuardElement::live.empty());
+            Audit::clean();
+        }
+        // Failure before construction, during edge construction, and during
+        // either shifted-element assignment or the final inserted-value assignment.
+        for (int mode = 0; mode < 5; ++mode) {
+            {
+                AssignDeque<GuardElement> d(2 * B - 1);
+                const auto allocations = Audit::allocations.size();
+                if (mode == 0) Audit::allocate_before_throw = 0;
+                if (mode == 1) Audit::construct_before_throw = 0;
+                if (mode == 2) GuardElement::copies_before_throw = 0;
+                if (mode >= 3) GuardElement::assignments_before_throw = mode == 3 ? 0 : 2;
+                bool threw = false;
+                try { d.emplace(d.begin() + (front ? 3 : d.size() - 3), 9); }
+                catch (...) { threw = true; }
+                Audit::allocate_before_throw = Audit::construct_before_throw = -1;
+                GuardElement::copies_before_throw = GuardElement::assignments_before_throw = -1;
+                CHECK(threw && d.size() == 2 * B - 1 && GuardElement::live.size() == d.size());
+                CHECK(Audit::allocations.size() == allocations);
+                auto it = d.emplace(d.begin() + (front ? 3 : d.size() - 3), 9);
+                CHECK(it->value == 9 && d.size() == 2 * B);
+            }
+            CHECK(GuardElement::live.empty());
+            Audit::clean();
+        }
+    }
+    // Map growth succeeds, then block allocation fails: no live object may be
+    // left outside the old range, even if the larger map remains installed.
+    for (bool front : {false, true}) {
+        for (int failure : {0, 1}) {
+            {
+                AssignDeque<GuardElement> d;
+                GuardElement value(7);
+                d.assign(8 * B - 1, value);
+                const auto allocations = Audit::allocations.size();
+                Audit::allocate_before_throw = failure;
+                bool threw = false;
+                try {
+                    if (front) d.emplace_front(9);
+                    else d.emplace_back(9);
+                } catch (const std::bad_alloc&) { threw = true; }
+                Audit::allocate_before_throw = -1;
+                CHECK(threw && d.size() == 8 * B - 1 && GuardElement::live.size() == d.size() + 1);
+                CHECK(Audit::allocations.size() == allocations);
+            }
+            CHECK(GuardElement::live.empty());
+            Audit::clean();
+        }
+    }
+}
+
+struct InsertLarge {
+    int value;
+    char padding[512]{};
+    explicit InsertLarge(int n = 0) : value(n) {}
+    bool operator==(const InsertLarge& other) const { return value == other.value; }
+};
+
+template <class T>
+void test_modifier_sequences() {
+    mystl::deque<T> d;
+    std::deque<T> expected;
+    std::mt19937 random(20261006);
+    for (int step = 0; step < 2500; ++step) {
+        const int value = static_cast<int>(random() % 1000);
+        switch (random() % 6) {
+            case 0: d.emplace_front(value); expected.emplace_front(value); break;
+            case 1: d.emplace_back(value); expected.emplace_back(value); break;
+            case 2: if (!d.empty()) { d.pop_front(); expected.pop_front(); } break;
+            case 3: if (!d.empty()) { d.pop_back(); expected.pop_back(); } break;
+            default: {
+                const auto index = random() % (d.size() + 1);
+                auto it = d.emplace(d.begin() + index, value);
+                expected.emplace(expected.begin() + index, value);
+                CHECK(it == d.begin() + index && *it == T(value));
+            }
+        }
+        CHECK(d.size() == expected.size());
+        for (std::size_t i = 0; i < d.size(); ++i) CHECK(d[i] == expected[i]);
+    }
+    d.clear();
+    d.emplace(d.begin(), 3);
+    auto moved = mystl::move(d);
+    auto it = d.emplace(d.begin(), 4);
+    CHECK(it == d.begin() && *it == T(4) && moved.front() == T(3));
+}
+
+template <class T>
+struct LimitedDequeAllocator : OwnerAllocator<T> {
+    template <class U> struct rebind { using other = LimitedDequeAllocator<U>; };
+    LimitedDequeAllocator() = default;
+    template <class U> LimitedDequeAllocator(const LimitedDequeAllocator<U>& a)
+        : OwnerAllocator<T>(a.owner) {}
+    std::size_t max_size() const noexcept {
+        if constexpr (std::is_pointer_v<T>) return OwnerAllocator<T>::max_size();
+        return 128;
+    }
+};
+
+void test_insert_boundaries() {
+    {
+        mystl::deque<int, LimitedDequeAllocator<int>> d(128, 1);
+        for (int mode = 0; mode < 3; ++mode) {
+            bool threw = false;
+            try {
+                if (mode == 0) d.emplace_front(2);
+                else if (mode == 1) d.emplace_back(2);
+                else d.emplace(d.begin() + 3, 2);
+            } catch (const mystl::length_error&) { threw = true; }
+            CHECK(threw && d.size() == 128);
+        }
+    }
+    Audit::clean();
+    for (bool front : {false, true}) {
+        {
+            Audit::map_limit = 8;
+            mystl::deque<int, OwnerAllocator<int>> d;
+            for (int i = 0; i < 5 * 128; ++i) {
+                if (front) d.emplace_front(i);
+                else d.emplace_back(i);
+            }
+            CHECK(d.size() == 640);
+            for (int i = 0; i < 640; ++i) CHECK(d[i] == (front ? 639 - i : i));
+        }
+        Audit::clean();
+    }
+    // Both ends need map growth; an aliased argument must survive relocation.
+    for (bool front : {false, true}) {
+        mystl::deque<int> d;
+        d.assign(1023, 1);
+        d[100] = 42;
+        const auto index = front ? 3 : d.size() - 3;
+        auto it = d.emplace(d.begin() + index, d[100]);
+        CHECK(d.size() == 1024 && it == d.begin() + index && *it == 42);
+        CHECK(d[front ? 101 : 100] == 42);
+    }
+    {
+        mystl::deque<std::unique_ptr<int>> d;
+        for (int i = 0; i < 260; ++i) d.emplace_back(std::make_unique<int>(i));
+        d.emplace(d.begin() + 2, std::make_unique<int>(800));
+        d.emplace(d.end() - 2, std::make_unique<int>(900));
+        CHECK(*d[2] == 800 && *d[3] == 2 && *d[d.size() - 3] == 900 && *d.back() == 259);
+    }
+}
+
 int main() {
     mystl::allocator<int> alloc;
     mystl::allocator<int*> map_alloc(alloc);
@@ -603,5 +910,14 @@ int main() {
     test_allocator_extended_move();
     test_assign_guards();
     test_assign_sequences();
+    test_assignment_propagation<true, true>();
+    test_assignment_propagation<true, false>();
+    test_assignment_propagation<false, false>();
+    test_assignment_propagation<false, true>();
+    test_assignment_failures();
+    test_insert_guards();
+    test_modifier_sequences<int>();
+    test_modifier_sequences<InsertLarge>();
+    test_insert_boundaries();
     std::puts("deque base regression tests passed");
 }
