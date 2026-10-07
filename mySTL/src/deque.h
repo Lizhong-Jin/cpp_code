@@ -12,6 +12,7 @@
 #include "utility.h"
 #include "stdexcept.h"
 #include "initializer_list.h"
+#include "vector.h"
 
 namespace mystl {
 
@@ -836,19 +837,19 @@ namespace mystl {
                 }
             }
             template <typename Input_Iterator>
-            void range_assign_until(Input_Iterator first, iterator end) {
+            void range_assign_until(Input_Iterator it, iterator end) {
                 while (last != end) {
-                    Allocator_traits::construct(alloc, last.operator->(), *first);
+                    Allocator_traits::construct(alloc, last.operator->(), *it);
                     ++last;
-                    ++first;
+                    ++it;
                 }
             }
             template <typename Input_Iterator>
-            void range_move_assign_until(Input_Iterator first, iterator end) {
+            void range_move_assign_until(Input_Iterator it, iterator end) {
                 while (last != end) {
-                    Allocator_traits::construct(alloc, last.operator->(), mystl::move(*first));
+                    Allocator_traits::construct(alloc, last.operator->(), mystl::move(*it));
                     ++last;
-                    ++first;
+                    ++it;
                 }
             }
 
@@ -964,8 +965,9 @@ namespace mystl {
             }
         }
 
-        // emplace
+        
     private:
+        // helper for emplace and insert
         template <typename... Args>
         constexpr iterator move_front_and_emplace(const_iterator pos, Args&&... args) {
             value_type insert_obj(mystl::forward<Args>(args)...);
@@ -1035,7 +1037,252 @@ namespace mystl {
             return insert_pos;
         }
 
+        // fill insert helper
+        constexpr iterator move_front_and_insert(const_iterator pos, size_type count, const value_type& value) {
+            const size_type n = pos - M_start;
+            if (count == 0) return M_start + n;
+
+            value_type insert_obj(value);
+
+            const size_type offset = M_start._cur - M_start._first;
+            const size_type front_nodes = count <= offset ? 0 : (count - offset + block_size - 1) / block_size;
+            Guard_nodes nodes(*this);
+            nodes.allocate(front_nodes, 0);
+
+            iterator new_start = M_start - count;
+            iterator insert_pos = M_start + n - count;
+            Guard_objects head(get_T_allocator(), new_start);
+
+            if (n <= count) {
+                if constexpr (is_nothrow_move_constructible_v<value_type> || !is_copy_constructible_v<value_type>){
+                    head.range_move_assign_until(M_start, new_start + n);
+                }else {
+                    head.range_assign_until(M_start, new_start + n);
+                }
+                head.fill_until(M_start, insert_obj);
+                mystl::fill(M_start, M_start + n, insert_obj);
+            }else {
+                if constexpr (is_nothrow_move_constructible_v<value_type> || !is_copy_constructible_v<value_type>){
+                    head.range_move_assign_until(M_start, new_start + count);
+                }else {
+                    head.range_assign_until(M_start, new_start + count);
+                }
+                if constexpr (is_nothrow_move_assignable_v<value_type> || !is_copy_assignable_v<value_type>){
+                    mystl::move(M_start + count, M_start + n, M_start);
+                }else {
+                    mystl::copy(M_start + count, M_start + n, M_start);
+                }
+                mystl::fill(insert_pos, insert_pos + count, insert_obj);
+            }
+
+            M_start = new_start;
+            head.release();
+            nodes.release();
+            return insert_pos;
+        }
+
+        constexpr iterator move_back_and_insert(const_iterator pos, size_type count, const value_type& value) {
+            const size_type n = pos - M_start;
+            iterator insert_pos = M_start + n;
+            if (count == 0) return insert_pos;
+
+            value_type insert_obj(value);
+
+            const size_type back_offset = M_finish._last - M_finish._cur - 1;
+            const size_type back_nodes = count <= back_offset ? 0 : (count - back_offset + block_size - 1) / block_size;
+            Guard_nodes nodes(*this);
+            nodes.allocate(0, back_nodes);
+
+            iterator new_finish = M_finish + count;
+            Guard_objects tail(get_T_allocator(), M_finish);
+
+            if (M_finish - pos <= count) {
+                tail.fill_until(insert_pos + count, insert_obj);
+                if constexpr (is_nothrow_move_constructible_v<value_type> || !is_copy_constructible_v<value_type>){
+                    tail.range_move_assign_until(insert_pos, new_finish);
+                }else {
+                    tail.range_assign_until(insert_pos, new_finish);
+                }
+                mystl::fill(insert_pos, M_finish, insert_obj);
+            }else {
+                if constexpr (is_nothrow_move_constructible_v<value_type> || !is_copy_constructible_v<value_type>){
+                    tail.range_move_assign_until(M_finish - count, new_finish);
+                }else {
+                    tail.range_assign_until(M_finish - count, new_finish);
+                }
+                if constexpr (is_nothrow_move_assignable_v<value_type> || !is_copy_assignable_v<value_type>){
+                    mystl::move_backward(insert_pos, M_finish - count, M_finish);
+                }else {
+                    mystl::copy_backward(insert_pos, M_finish - count, M_finish);
+                }
+                mystl::fill(insert_pos, insert_pos + count, insert_obj);
+            }
+
+            M_finish = new_finish;
+            tail.release();
+            nodes.release();
+            return insert_pos;
+        }
+
+        // range insert helper
+        template <typename Iterator>
+        constexpr iterator move_front_and_range_insert(const_iterator pos, Iterator first, Iterator last, size_type count) {
+            const size_type n = pos - M_start;
+            if (count == 0) return M_start + n;
+
+            const size_type offset = M_start._cur - M_start._first;
+            const size_type front_nodes = count <= offset ? 0 : (count - offset + block_size - 1) / block_size;
+            Guard_nodes nodes(*this);
+            nodes.allocate(front_nodes, 0);
+
+            iterator new_start = M_start - count;
+            iterator insert_pos = M_start + n - count;
+            Guard_objects head(get_T_allocator(), new_start);
+
+            if (n <= count) {
+                Iterator mid = first;
+                mystl::advance(mid, count - n);
+                if constexpr (is_nothrow_move_constructible_v<value_type> || !is_copy_constructible_v<value_type>){
+                    head.range_move_assign_until(M_start, new_start + n);
+                }else {
+                    head.range_assign_until(M_start, new_start + n);
+                }
+                head.range_assign_until(first, M_start);
+                mystl::copy(mid, last, M_start);
+            }else {
+                if constexpr (is_nothrow_move_constructible_v<value_type> || !is_copy_constructible_v<value_type>){
+                    head.range_move_assign_until(M_start, new_start + count);
+                }else {
+                    head.range_assign_until(M_start, new_start + count);
+                }
+                if constexpr (is_nothrow_move_assignable_v<value_type> || !is_copy_assignable_v<value_type>){
+                    mystl::move(M_start + count, M_start + n, M_start);
+                }else {
+                    mystl::copy(M_start + count, M_start + n, M_start);   
+                }
+                mystl::copy(first, last, insert_pos);
+            }
+
+            M_start = new_start;
+            head.release();
+            nodes.release();
+            return insert_pos;
+        }
+
+        template <typename Iterator>
+        constexpr iterator move_back_and_range_insert(const_iterator pos, Iterator first, Iterator last, size_type count) {
+            const size_type n = pos - M_start;
+            iterator insert_pos = M_start + n;
+            if (count == 0) return insert_pos;
+
+            const size_type back_offset = M_finish._last - M_finish._cur - 1;
+            const size_type back_nodes = count <= back_offset ? 0 : (count - back_offset + block_size - 1) / block_size;
+            Guard_nodes nodes(*this);
+            nodes.allocate(0, back_nodes);
+
+            iterator new_finish = M_finish + count;
+            Guard_objects tail(get_T_allocator(), M_finish);
+
+            if (M_finish - pos <= count) {
+                Iterator mid = first;
+                mystl::advance(mid, M_finish - pos);
+                tail.range_assign_until(mid, insert_pos + count);
+                if constexpr (is_nothrow_move_constructible_v<value_type> || !is_copy_constructible_v<value_type>){
+                    tail.range_move_assign_until(insert_pos, new_finish);
+                }else {
+                    tail.range_assign_until(insert_pos, new_finish);
+                }
+                mystl::copy(first, mid, insert_pos);
+            }else {
+                if constexpr (is_nothrow_move_constructible_v<value_type> || !is_copy_constructible_v<value_type>){
+                    tail.range_move_assign_until(M_finish - count, new_finish);
+                }else {
+                    tail.range_assign_until(M_finish - count, new_finish);
+                }
+                if constexpr (is_nothrow_move_assignable_v<value_type> || !is_copy_assignable_v<value_type>){
+                    mystl::move_backward(insert_pos, M_finish - count, M_finish);
+                }else {
+                    mystl::copy_backward(insert_pos, M_finish - count, M_finish);
+                }
+                mystl::copy(first, last, insert_pos);
+            }
+
+            M_finish = new_finish;
+            tail.release();
+            nodes.release();
+            return insert_pos;
+        }
+
+        // range insert
+        template <typename Forward_Iterator>
+            requires mystl::is_input_iterator_v<Forward_Iterator>
+        constexpr iterator range_insert(const_iterator pos, Forward_Iterator first, Forward_Iterator last, forward_iterator_tag) {
+            const size_type count = mystl::distance(first, last);
+            if (count > max_size() || size() > max_size() - count) {
+                throw mystl::length_error("deque cannot be larger than max_size()");
+            }
+            if (!M_map) {
+                assert(pos == M_start);
+                Base::M_initialize_map(0);
+                range_assign(first, last, count);
+                return M_start;
+            }
+            assert(pos >= M_start && pos <= M_finish);
+            const size_type n = pos - M_start;
+            if (count == 0) {
+                return M_start + n;
+            }
+            
+            iterator insert_pos = M_start + n;
+            
+            const size_type full_size = M_map_size * block_size - 1;
+            if (size() + count > full_size) {
+                Base::M_reallocate_map((size() + count) / block_size + 1);
+                insert_pos = M_start + n;
+            }
+            if (n <= size() / 2) {
+                if (Base::M_get_front_empty_position() < count) {
+                    const size_type front_slot = Base::M_get_front_slot();
+                    const size_type offset = M_start._cur - M_start._first;
+                    const size_type front_needed = count <= offset ? 0 : (count - offset + block_size - 1) / block_size;
+                    if (front_needed - front_slot <= Base::M_get_back_slot()) {
+                        Base::M_shift_map_right(front_needed - front_slot);
+                    }else {
+                        Base::M_reserve_map_at_front(front_needed);
+                    }
+                    insert_pos = M_start + n;
+                }
+                insert_pos = move_front_and_range_insert(insert_pos, first, last, count);
+            }else {
+                if (Base::M_get_back_empty_position() < count) {
+                    const size_type back_slot = Base::M_get_back_slot();
+                    const size_type back_offset = M_finish._last - M_finish._cur - 1;
+                    const size_type back_needed = count <= back_offset ? 0 : (count - back_offset + block_size - 1) / block_size;
+                    if (back_needed - back_slot <= Base::M_get_front_slot()) {
+                        Base::M_shift_map_left(back_needed -  back_slot);
+                    }else {
+                        Base::M_reserve_map_at_back(back_needed);
+                    }
+                    insert_pos = M_start + n;
+                }
+                insert_pos = move_back_and_range_insert(insert_pos, first, last, count);
+            }
+            return insert_pos; 
+        }
+
+        template <typename Input_Iterator>
+            requires mystl::is_input_iterator_v<Input_Iterator>
+        constexpr iterator range_insert(const_iterator pos, Input_Iterator first, Input_Iterator last, input_iterator_tag) {
+            assert(pos >= begin() && pos <= end());
+            const size_type n = pos - cbegin();
+            if (first == last) return M_start + n;
+
+            vector<value_type, T_alloc_type> temp(first, last, get_T_allocator());
+            return range_insert(pos, temp.begin(), temp.end(), forward_iterator_tag{});
+        }
+
     public:
+        // emplace
         template <typename... Args>
         constexpr iterator emplace(const_iterator pos, Args&&... args) {
             if (size() >= max_size()) {
@@ -1057,33 +1304,29 @@ namespace mystl {
                 return end() - 1;
             }
             const size_type first = pos - M_start;
-            iterator insert_pos;
+            iterator insert_pos = M_start + first;
             if (first <= size() / 2) {
-                if (Base::M_get_front_empty_position() > 0) {
-                    insert_pos = move_front_and_emplace(pos, mystl::forward<Args>(args)...);
-                }else if (Base::M_get_back_slot() > 0) {
-                    const size_type tatal_slot = Base::M_get_back_slot();
-                    Base::M_shift_map_right((tatal_slot + 1) / 2);
+                if (Base::M_get_front_empty_position() == 0) {
+                    if (Base::M_get_back_slot() > 0) {
+                        const size_type tatal_slot = Base::M_get_back_slot();
+                        Base::M_shift_map_right((tatal_slot + 1) / 2);
+                    }else {
+                        Base::M_reserve_map_at_front();
+                    }
                     insert_pos = M_start + first;
-                    insert_pos = move_front_and_emplace(insert_pos, mystl::forward<Args>(args)...);
-                }else {
-                    Base::M_reserve_map_at_front();
-                    insert_pos = M_start + first;
-                    insert_pos = move_front_and_emplace(insert_pos, mystl::forward<Args>(args)...);
                 }
+                insert_pos = move_front_and_emplace(insert_pos, mystl::forward<Args>(args)...);
             }else {
-                if (Base::M_get_back_empty_position() > 0) {
-                    insert_pos = move_back_and_emplace(pos, mystl::forward<Args>(args)...);
-                }else if (Base::M_get_front_slot() > 0) {
-                    const size_type tatal_slot = Base::M_get_front_slot();
-                    Base::M_shift_map_left((tatal_slot + 1) / 2);
+                if (Base::M_get_back_empty_position() == 0) {
+                    if (Base::M_get_front_slot() > 0) {
+                        const size_type tatal_slot = Base::M_get_front_slot();
+                        Base::M_shift_map_left((tatal_slot + 1) / 2);
+                    }else {
+                        Base::M_reserve_map_at_back();
+                    }
                     insert_pos = M_start + first;
-                    insert_pos = move_back_and_emplace(insert_pos, mystl::forward<Args>(args)...);
-                }else {
-                    Base::M_reserve_map_at_back();
-                    insert_pos = M_start + first;
-                    insert_pos = move_back_and_emplace(insert_pos, mystl::forward<Args>(args)...);
                 }
+                insert_pos = move_back_and_emplace(insert_pos, mystl::forward<Args>(args)...);
             }
             return insert_pos;
         }
@@ -1095,6 +1338,74 @@ namespace mystl {
 
         constexpr iterator insert(const_iterator pos, value_type&& value) {
             return emplace(pos, mystl::move(value));
+        }
+
+        constexpr iterator insert(const_iterator pos, size_type count, const value_type& value) {
+            if (count > max_size() || size() > max_size() - count) {
+                throw mystl::length_error("deque cannot be larger than max_size()");
+            }
+            if (!M_map) {
+                assert(pos == M_start);
+                fill_assign(count, value);
+                return M_start;
+            }
+            assert(pos >= M_start && pos <= M_finish);
+            const size_type n = pos - M_start;
+            if (count == 0) {
+                return M_start + n;
+            }
+            
+            iterator insert_pos = M_start + n;
+            value_type insert_obj(value);
+            
+            const size_type full_size = M_map_size * block_size - 1;
+            if (size() + count > full_size) {
+                Base::M_reallocate_map((size() + count) / block_size + 1);
+                insert_pos = M_start + n;
+            }
+            if (n <= size() / 2) {
+                if (Base::M_get_front_empty_position() < count) {
+                    const size_type front_slot = Base::M_get_front_slot();
+                    const size_type offset = M_start._cur - M_start._first;
+                    const size_type front_needed = count <= offset ? 0 : (count - offset + block_size - 1) / block_size;
+                    if (front_needed - front_slot <= Base::M_get_back_slot()) {
+                        Base::M_shift_map_right(front_needed - front_slot);
+                    }else {
+                        Base::M_reserve_map_at_front(front_needed);
+                    }
+                    insert_pos = M_start + n;
+                }
+                insert_pos = move_front_and_insert(insert_pos, count, value);
+            }else {
+                if (Base::M_get_back_empty_position() < count) {
+                    const size_type back_slot = Base::M_get_back_slot();
+                    const size_type back_offset = M_finish._last - M_finish._cur - 1;
+                    const size_type back_needed = count <= back_offset ? 0 : (count - back_offset + block_size - 1) / block_size;
+                    if (back_needed - back_slot <= Base::M_get_front_slot()) {
+                        Base::M_shift_map_left(back_needed -  back_slot);
+                    }else {
+                        Base::M_reserve_map_at_back(back_needed);
+                    }
+                    insert_pos = M_start + n;
+                }
+                insert_pos = move_back_and_insert(insert_pos, count, value);
+            }
+            return insert_pos;
+        }
+
+        template <typename Input_Iterator>
+            requires mystl::is_input_iterator_v<Input_Iterator>
+        constexpr iterator insert(const_iterator pos, Input_Iterator first, Input_Iterator last) {
+            if (!M_map) {
+                assert(pos == M_start);
+                range_assign(first, last, iter_category<Input_Iterator>{});
+                return M_start;
+            }
+            return range_insert(pos, first, last, iter_category<Input_Iterator>{});
+        }
+
+        constexpr iterator insert(const_iterator pos, initializer_list<value_type> list) {
+            return insert(pos, list.begin(), list.end());
         }
 
 
