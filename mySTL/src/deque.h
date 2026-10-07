@@ -148,7 +148,7 @@ namespace mystl {
             _first = *node;
             _last = _first + deque_block_size<T>;
         }
-    };
+    }; // class deque_iterator
 
     // Owns RAW storage only. The derived container constructs/destroys T objects.
     // Every non-null map slot owns one fixed-size block; active blocks occupy
@@ -418,6 +418,12 @@ namespace mystl {
             M_map_allocator = mystl::move(other.M_map_allocator);
         }
 
+        constexpr void M_swap_allocators(deque_base& other) noexcept {
+            using mystl::swap;
+            swap(M_allocator, other.M_allocator);
+            swap(M_map_allocator, other.M_map_allocator);
+        }
+
     private:
         T_alloc_type M_allocator;
         Map_alloc_type M_map_allocator;
@@ -492,7 +498,7 @@ namespace mystl {
             M_start = start;
             M_finish = finish;
         }
-    };
+    }; // class deque_base
 
     
 
@@ -1564,11 +1570,9 @@ namespace mystl {
         constexpr void swap(deque& other) noexcept {
             if (this == &other) return;
             if constexpr (Allocator_traits::propagate_on_container_swap::value) {
-                using mystl::swap;
-                swap(get_T_allocator(), other.get_T_allocator());
+                Base::M_swap_allocators(other);
             }else {
-                // As with std::vector, non-propagating allocators must compare equal.
-                assert(get_T_allocator() == other.get_T_allocator());
+                assert(Base::M_allocators_equal(other));
             }
             Base::M_swap_data(other);
         }
@@ -1920,7 +1924,7 @@ namespace mystl {
         static constexpr size_type get_max_size(const T_alloc_type& alloc) noexcept {
             return Base::M_max_size(alloc);
         }
-    };
+    }; // class deque
 
 
     template<typename T, typename Alloc>

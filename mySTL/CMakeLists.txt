@@ -39,9 +39,10 @@ add_executable(mySTL main.cpp
         src/impl/pointer_traits.h)
 
 # Benchmarks are separate from correctness tests and are never registered with CTest.
-option(MYSTL_BUILD_BENCHMARKS "Build the standalone vector comparison benchmark" OFF)
+option(MYSTL_BUILD_BENCHMARKS "Build standalone container comparison benchmarks" OFF)
 if(MYSTL_BUILD_BENCHMARKS)
     add_executable(mystl_vector_benchmark test/vector_benchmark.cpp)
+    add_executable(mystl_deque_benchmark test/deque_benchmark.cpp)
 endif()
 
 include(CTest)
