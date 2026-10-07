@@ -791,7 +791,7 @@ namespace mystl {
                 }
             }
 
-            void allocate(size_type front_nodes, size_type back_nodes) {
+            constexpr void allocate(size_type front_nodes, size_type back_nodes) {
                 assert(front_nodes <= front_first);
                 assert(back_nodes <= owner.M_map_size - back_last);
                 for (size_type i = 0; i < front_nodes; ++i) {
@@ -806,7 +806,7 @@ namespace mystl {
                     ++back_last;
                 }
             }
-            void release() noexcept { active = false; }
+            constexpr void release() noexcept { active = false; }
         };
 
         // Tracks exactly the objects whose construction has completed. Declare
@@ -830,14 +830,14 @@ namespace mystl {
                     Allocator_traits::destroy(alloc, last.operator->());
                 }
             }
-            void fill_until(iterator end, const value_type& value) {
+            constexpr void fill_until(iterator end, const value_type& value) {
                 while (last != end) {
                     Allocator_traits::construct(alloc, last.operator->(), value);
                     ++last;
                 }
             }
             template <typename Input_Iterator>
-            void range_assign_until(Input_Iterator it, iterator end) {
+            constexpr void range_assign_until(Input_Iterator it, iterator end) {
                 while (last != end) {
                     Allocator_traits::construct(alloc, last.operator->(), *it);
                     ++last;
@@ -845,15 +845,19 @@ namespace mystl {
                 }
             }
             template <typename Input_Iterator>
-            void range_move_assign_until(Input_Iterator it, iterator end) {
+            constexpr void range_move_assign_until(Input_Iterator it, iterator end) {
                 while (last != end) {
                     Allocator_traits::construct(alloc, last.operator->(), mystl::move(*it));
                     ++last;
                     ++it;
                 }
             }
+            constexpr void default_fill_until(iterator end) {
+                mystl::uninitialized_default_construct_a(last, end, alloc);
+                last = end;
+            }
 
-            void release() noexcept { first = last; }
+            constexpr void release() noexcept { first = last; }
         };
 
     public:
@@ -1408,7 +1412,166 @@ namespace mystl {
             return insert(pos, list.begin(), list.end());
         }
 
+        // erase
+        constexpr iterator erase(const_iterator pos) {
+            assert(size() > 0 && pos >= cbegin() && pos < cend());
+            const size_type n = pos - M_start;
+            iterator erase_pos = M_start + n;
 
+            if (n <= size() / 2) {
+                const size_type old_slot = M_start._node - M_map;
+                const bool cross_block = M_start._cur == M_start._last - 1;
+                if (pos != M_start) {
+                    if constexpr (is_nothrow_move_assignable_v<value_type> || !is_copy_assignable_v<value_type>) {
+                        mystl::move_backward(M_start, erase_pos, erase_pos + 1);
+                    }else {
+                        mystl::copy_backward(M_start, erase_pos, erase_pos + 1);
+                    }
+                }
+                Allocator_traits::destroy(get_T_allocator(), M_start.operator->());
+                ++M_start;
+                if (cross_block) {
+                    Base::M_deallocate_node(M_map[old_slot]);
+                    M_map[old_slot] = nullptr;
+                }
+            }else {
+                const size_type old_slot = M_finish._node - M_map;
+                const bool cross_block = M_finish._cur == M_finish._first;
+                if (pos != M_finish - 1) {
+                    if constexpr (is_nothrow_move_assignable_v<value_type> || !is_copy_assignable_v<value_type>) {
+                        mystl::move(erase_pos + 1, M_finish, erase_pos);
+                    }else {
+                        mystl::copy(erase_pos + 1, M_finish, erase_pos);
+                    }
+                }
+                --M_finish;
+                Allocator_traits::destroy(get_T_allocator(), M_finish.operator->());
+                if (cross_block) {
+                    Base::M_deallocate_node(M_map[old_slot]);
+                    M_map[old_slot] = nullptr;
+                }
+            }
+            return M_start + n;
+        }
+
+        constexpr iterator erase(const_iterator first, const_iterator last) {
+            assert(first <= last);
+            assert(size() >= (last - first) && first >= cbegin() && last <= cend());
+            const size_type n = first - M_start;
+            const size_type count = last - first;
+            if (count == 0) return M_start + n;
+            iterator erase_first = M_start + n;
+            iterator erase_last = M_start + n + count;
+
+            const size_type front_residual = n;
+            const size_type back_residual = M_finish - last;
+            if (front_residual < back_residual) {
+                size_type front_node = M_start._node - M_map;
+                const size_type new_front_node = (M_start + count)._node - M_map;
+                if (first != M_start) {
+                    if constexpr (is_nothrow_move_assignable_v<value_type> || !is_copy_assignable_v<value_type>) {
+                        mystl::move_backward(M_start, erase_first, erase_last);
+                    }else {
+                        mystl::copy_backward(M_start, erase_first, erase_last);
+                    }
+                }
+                for (iterator it = M_start; it < M_start + count; ++it) {
+                    Allocator_traits::destroy(get_T_allocator(), it.operator->());
+                }
+                M_start += count;
+                while (front_node < new_front_node) {
+                    Base::M_deallocate_node(M_map[front_node]);
+                    M_map[front_node] = nullptr;
+                    ++front_node;
+                }
+            }else {
+                size_type back_node = M_finish._node - M_map;
+                const size_type new_back_node = (M_finish - count)._node - M_map;
+                if (last != M_finish) {
+                    if constexpr (is_nothrow_move_assignable_v<value_type> || !is_copy_assignable_v<value_type>) {
+                        mystl::move(erase_last, M_finish, erase_first);
+                    }else {
+                        mystl::copy(erase_last, M_finish, erase_first);
+                    }
+                }
+                for (iterator it = M_finish - count; it < M_finish; ++it) {
+                    Allocator_traits::destroy(get_T_allocator(), it.operator->());
+                }
+                M_finish -= count;
+                while (back_node > new_back_node) {
+                    Base::M_deallocate_node(M_map[back_node]);
+                    M_map[back_node] = nullptr;
+                    --back_node;
+                }
+            }
+            return M_start + n;
+        }
+
+        // resize
+        constexpr void resize(size_type count) {
+            if (count > max_size()) 
+                throw mystl::length_error("cannot resize deque larger than max_size()"); 
+            if (count == size()) return;
+            if (count == 0) {
+                clear();
+                return;
+            }
+            if (count < size()) {
+                size_type back_node = M_finish._node - M_map;
+                const size_type new_back_node = (M_start + count)._node - M_map;
+                for (iterator it = M_start + count; it < M_finish; ++it) {
+                    Allocator_traits::destroy(get_T_allocator(), it.operator->());
+                }
+                M_finish = M_start + count;
+                while (back_node > new_back_node) {
+                    Base::M_deallocate_node(M_map[back_node]);
+                    M_map[back_node] = nullptr;
+                    --back_node;
+                }
+                return;
+            }
+
+            if (!M_map) {
+                Base::M_initialize_map(0);
+            }
+            const size_type enable_position = size() + Base::M_get_back_empty_position();
+            const size_type back_extra_position = count - size() - (M_finish._last - M_finish._cur - 1);
+            const size_type back_needed = (back_extra_position + block_size - 1) / block_size;
+            if (count > enable_position) {
+                const size_type front_slot = Base::M_get_front_slot();
+                if (count <= front_slot * block_size + enable_position) {
+                    const size_type front_extra = (count - enable_position + block_size - 1) / block_size;
+                    const size_type shift_dist = front_extra + (Base::M_get_front_slot() - front_extra) / 2;
+                    Base::M_shift_map_left(shift_dist);
+                }else {
+                    Base::M_reserve_map_at_back(back_needed);
+                }
+            }
+            
+            Guard_nodes nodes(*this);
+            nodes.allocate(0, back_needed);
+
+            iterator new_finish = M_start + count;
+            Guard_objects tail(get_T_allocator(), M_finish);
+            tail.default_fill_until(new_finish);
+
+            M_finish = new_finish;
+            tail.release();
+            nodes.release();
+        }
+
+        // swap
+        constexpr void swap(deque& other) noexcept {
+            if (this == &other) return;
+            if constexpr (Allocator_traits::propagate_on_container_swap::value) {
+                using mystl::swap;
+                swap(get_T_allocator(), other.get_T_allocator());
+            }else {
+                // As with std::vector, non-propagating allocators must compare equal.
+                assert(get_T_allocator() == other.get_T_allocator());
+            }
+            Base::M_swap_data(other);
+        }
 
 
     private:
@@ -1758,6 +1921,19 @@ namespace mystl {
             return Base::M_max_size(alloc);
         }
     };
+
+
+    template<typename T, typename Alloc>
+    constexpr bool operator==(const mystl::deque<T, Alloc>& lhs, const mystl::deque<T, Alloc>& rhs) {
+        return lhs.size() == rhs.size() && mystl::equal(lhs.begin(), lhs.end(), rhs.begin());
+    }
+
+    template<typename T, typename Alloc>
+    constexpr void swap(mystl::deque<T, Alloc>& lhs, mystl::deque<T, Alloc>& rhs) 
+        noexcept(noexcept(lhs.swap(rhs))) 
+    {
+        lhs.swap(rhs);
+    }    
 
 } // namespace mystl
 
