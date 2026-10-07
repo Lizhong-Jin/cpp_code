@@ -15,9 +15,10 @@
 #include "vector.h"
 
 namespace mystl {
+    inline constexpr size_t size_of_deque_block = 4096;
 
     template <typename T>
-    inline constexpr size_t deque_block_size = sizeof(T) < 512 ? 512 / sizeof(T) : 1;
+    inline constexpr size_t deque_block_size = sizeof(T) < size_of_deque_block ? size_of_deque_block / sizeof(T) : 1;
 
     template <typename T, typename Allocator> class deque_base;
     template <typename T, typename Allocator> class deque;

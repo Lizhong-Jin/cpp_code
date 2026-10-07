@@ -575,7 +575,7 @@ void test_assign_sequences() {
     }
     Audit::clean();
     struct Big {
-        char padding[512]{};
+        char padding[mystl::size_of_deque_block]{};
         int value = 0;
     };
     static_assert(mystl::deque_block_size<Big> == 1);

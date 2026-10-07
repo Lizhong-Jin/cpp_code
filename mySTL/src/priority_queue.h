@@ -199,7 +199,7 @@ namespace mystl {
         }
 
         constexpr void pop() {
-            MYSTL_DEBUG(!empty());
+            assert(!empty());
             mystl::pop_heap(c.begin(), c.end(), comp);
             c.pop_back();
         }
