@@ -82,7 +82,7 @@ namespace mystl {
             friend class rb_tree;
             template<bool> friend class tree_iterator;
             
-            using node_type = rb_node<Value>
+            using node_type = rb_node<Value>;
             using base_pointer = mystl::conditional_t<IsConst, const rb_node_base*, rb_node_base*>;
             using value_node_pointer = mystl::conditional_t<IsConst, const node_type*, node_type*>;
 
@@ -218,8 +218,12 @@ namespace mystl {
 
         rb_node_base header_;
         size_type size_ = 0;
-    
+
     public:
+        allocator_type get_allocator() const noexcept {
+            return allocator_type(node_alloc_);
+        }
+    
         // *************************************************************************************
         // construct
         constexpr rb_tree() : rb_tree(Compare{}, allocator_type{}, KeyOfValue{}) {}
@@ -234,11 +238,54 @@ namespace mystl {
             reset_empty();
         }
 
-        constexpr rb_tree(const rb_tree& other);
-        constexpr rb_tree(const rb_tree& other, const allocator_type& alloc);
+        constexpr rb_tree(const rb_tree& other)
+            : rb_tree(other, alloc_traits::select_on_container_copy_construction(other.get_allocator())) {}
 
-        constexpr rb_tree(rb_tree&& other);
-        constexpr rb_tree(rb_tree&& other, const allocator_type& alloc);
+        constexpr rb_tree(const rb_tree& other, const allocator_type& alloc)
+            : rb_tree(other.comp_, alloc, other.key_of_value_)
+        {
+            if (other.size_ > max_size())
+                throw mystl::length_error("rb_tree copy exceeds max_size");
+            copy_tree(other);
+        }
+
+        constexpr rb_tree(rb_tree&& other)
+            noexcept(
+                mystl::is_nothrow_copy_constructible_v<Compare> &&
+                mystl::is_nothrow_copy_constructible_v<KeyOfValue> &&
+                mystl::is_nothrow_move_constructible_v<node_allocator>)
+            : comp_(other.comp_), key_of_value_(other.key_of_value_), node_alloc_(mystl::move(other.node_alloc_))
+        {
+            reset_empty();
+            take_nodes_from(other);
+        }
+
+        constexpr rb_tree(rb_tree&& other, const allocator_type& alloc)
+            : rb_tree(other.comp_, alloc, other.key_of_value_)
+        {
+            if (node_alloc_ == other.node_alloc_) {
+                take_nodes_from(other);
+                return;
+            }
+            if (other.empty())
+                return;
+            if (other.size_ > max_size())
+                throw mystl::length_error("rb_tree move exceeds max_size");
+            try {
+                Guard_subtree guard(*this, clone_moving_subtree(other));
+                auto* left = minimum(guard.root);
+                auto* right = maximum(guard.root);
+
+                header_.parent = guard.release();
+                header_.left = left;
+                header_.right = right;
+                size_ = other.size_;
+            }catch(...) {
+                other.clear();
+                throw;
+            }
+            other.clear();
+        }
 
         // *************************************************************************************
         // destruct
@@ -311,9 +358,6 @@ namespace mystl {
         // emplace_unique
         template <typename... Args>
         constexpr mystl::pair<iterator, bool> emplace_unique(Args&&... args) {
-            if (size_ >= max_size())
-                throw mystl::length_error("rb_tree cannot be larger than max_size()");
-            
             Guard_subtree guard(*this, create_node(mystl::forward<Args>(args)...));
             
             if (size_ == 0) {
@@ -338,7 +382,7 @@ namespace mystl {
                     prev = node;
                     node = node->left;
                     insert_left = true;
-                }else if (comp_(key_of_value_(static_cast<node_type*>(node)->value)), key_of_value_(p->value)) {
+                }else if (comp_(key_of_value_(static_cast<node_type*>(node)->value), key_of_value_(p->value))) {
                     prev = node;
                     node = node->right;
                     insert_left = false;
@@ -346,23 +390,27 @@ namespace mystl {
                     return mystl::make_pair(iterator(node), false);
                 }
             }
+            if (size_ >= max_size())
+                throw mystl::length_error("rb_tree cannot be larger than max_size()");
+
+            p = guard.release();
             p->parent = prev;
-            ++size_;
 
             if (insert_left) {
                 prev->left = p;
+                if (prev == header_.left)
+                    header_.left = p;
             }else {
                 prev->right = p;
+                if (prev == header_.right)
+                    header_.right = p;
             }
+            ++size_;
+            
             if (prev->color == Color::RED) {
                 rebalance_after_insert(p);
             }
-            if (comp_(key_of_value_(p->value), key_of_value_(static_cast<node_type*>(header_.left)->value))) {
-                header_.left = p;
-            }else if (!comp_(key_of_value_(p->value), key_of_value_(static_cast<node_type*>(header_.right)->value))) {
-                header_.right = p;
-            }
-            return mystl::make_pair(iterator(guard.release()), true);
+            return mystl::make_pair(iterator(p), true);
         }
         
     private:
@@ -374,24 +422,24 @@ namespace mystl {
             ++size_;
 
             if (pos == cbegin()) {
-                node_type* old_begin = header_.left;
+                rb_node_base* old_begin = header_.left;
                 old_begin->left = p;
                 p->parent = old_begin;
                 header_.left = p;
             }else if (pos == cend()) {
-                node_type* old_tail = header_.right;
+                rb_node_base* old_tail = header_.right;
                 old_tail->right = p;
                 p->parent = old_tail;
                 header_.right = p;
             }else {
-                const_iterator prev = pos;
-                --prev;
+                iterator fa = pos;
                 if (pos.node_->left == nullptr) {
-                    pos.node_->left = p;
-                    p->parent = pos.node_;
+                    fa.node_->left = p;
+                    p->parent = fa.node_;
                 }else {
-                    prev.node_->right = p;
-                    p->parent = prev.node_;
+                    --fa;
+                    fa.node_->right = p;
+                    p->parent = fa.node_;
                 }
             }
             if (p->parent->color == Color::RED) {
@@ -570,6 +618,23 @@ namespace mystl {
             return guard.release();
         }
 
+        constexpr node_type* clone_moving_subtree(rb_node_base* src, rb_node_base* parent){
+            if (!src) return nullptr;
+
+            auto* source = static_cast<node_type*>(src);
+
+            Guard_subtree guard(*this, create_node(mystl::move(source->value)));
+
+            auto* p = guard.root;
+            p->parent = parent;
+            p->color = src->color;
+
+            p->left = clone_moving_subtree(src->left, p);
+            p->right = clone_moving_subtree(src->right, p);
+
+            return guard.release();
+        }
+
         static rb_node_base* minimum(rb_node_base* p) noexcept {
             while (p->left)
                 p = p->left;
@@ -633,7 +698,7 @@ namespace mystl {
         constexpr void rebalance_after_insert(rb_node_base* node) noexcept {
             while (node != header_.parent && node->parent->color == Color::RED) {
                 if (node->parent->parent->left == node->parent) {
-                    node_type* uncle = node->parent->parent->right;
+                    rb_node_base* uncle = node->parent->parent->right;
                     if (uncle && uncle->color == Color::RED) {
                         uncle->color = Color::BLACK;
                         node->parent->color = Color::BLACK;
@@ -649,7 +714,7 @@ namespace mystl {
                         right_rotate(node->parent->parent);
                     }
                 }else {
-                    node_type* uncle = node->parent->parent->left;
+                    rb_node_base* uncle = node->parent->parent->left;
                     if (uncle && uncle->color == Color::RED) {
                         uncle->color = Color::BLACK;
                         node->parent->color = Color::BLACK;
