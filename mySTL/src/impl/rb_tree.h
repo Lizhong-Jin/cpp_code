@@ -267,23 +267,23 @@ namespace mystl {
             return const_iterator(&header_);
         }
 
-        constexpr iterator rbegin() noexcept {
-            return reverse_iterator(&header_); 
+        constexpr reverse_iterator rbegin() noexcept {
+            return reverse_iterator(end()); 
         }
-        constexpr iterator rend() noexcept {
-            return reverse_iterator(header_.left); 
+        constexpr reverse_iterator rend() noexcept {
+            return reverse_iterator(begin()); 
         }
-        constexpr const_iterator rbegin() const noexcept {
-            return const_reverse_iterator(&header_);
+        constexpr const_reverse_iterator rbegin() const noexcept {
+            return const_reverse_iterator(end());
         }
-        constexpr const_iterator rend() const noexcept {
-            return const_reverse_iterator(header_.left);
+        constexpr const_reverse_iterator rend() const noexcept {
+            return const_reverse_iterator(begin());
         }
-        constexpr const_iterator crbegin() const noexcept {
-            return const_reverse_iterator(&header_);
+        constexpr const_reverse_iterator crbegin() const noexcept {
+            return const_reverse_iterator(end());
         }
-        constexpr const_iterator crend() const noexcept {
-            return const_reverse_iterator(header_.left);
+        constexpr const_reverse_iterator crend() const noexcept {
+            return const_reverse_iterator(begin());
         }
 
         // *************************************************************************************
@@ -315,9 +315,9 @@ namespace mystl {
                 throw mystl::length_error("rb_tree cannot be larger than max_size()");
             
             Guard_subtree guard(*this, create_node(mystl::forward<Args>(args)...));
-            auto* p = guard.release();
-
+            
             if (size_ == 0) {
+                auto* p = guard.release();
                 p->color = Color::BLACK;
                 p->parent = &header_;
                 header_.parent = p;
@@ -326,17 +326,22 @@ namespace mystl {
                 size_ = 1;
                 return mystl::make_pair(iterator(p), true);
             }
+
+            auto* p = guard.root;
             p->color = Color::RED;
 
             rb_node_base* node = header_.parent;
             rb_node_base* prev = &header_;
+            bool insert_left;
             while (node != nullptr) {
-                if (comp_(p->value, static_cast<node_type*>(node)->value)) {
+                if (comp_(key_of_value_(p->value), key_of_value_(static_cast<node_type*>(node)->value))) {
                     prev = node;
                     node = node->left;
-                }else if (!comp_(p->value, static_cast<node_type*>(node)->value)) {
+                    insert_left = true;
+                }else if (comp_(key_of_value_(static_cast<node_type*>(node)->value)), key_of_value_(p->value)) {
                     prev = node;
                     node = node->right;
+                    insert_left = false;
                 }else {
                     return mystl::make_pair(iterator(node), false);
                 }
@@ -344,20 +349,20 @@ namespace mystl {
             p->parent = prev;
             ++size_;
 
-            if (comp_(p->value, static_cast<node_type*>(prev)->value)) {
-                prev->right = p;
-            }else {
+            if (insert_left) {
                 prev->left = p;
+            }else {
+                prev->right = p;
             }
             if (prev->color == Color::RED) {
                 rebalance_after_insert(p);
             }
-            if (comp_(p->value, static_cast<node_type*>(header_.left)->value)) {
+            if (comp_(key_of_value_(p->value), key_of_value_(static_cast<node_type*>(header_.left)->value))) {
                 header_.left = p;
-            }else if (!comp_(p->value, static_cast<node_type*>(header_.right)->value)) {
+            }else if (!comp_(key_of_value_(p->value), key_of_value_(static_cast<node_type*>(header_.right)->value))) {
                 header_.right = p;
             }
-            return mystl::make_pair(iterator(p), true);
+            return mystl::make_pair(iterator(guard.release()), true);
         }
         
     private:
@@ -379,7 +384,7 @@ namespace mystl {
                 p->parent = old_tail;
                 header_.right = p;
             }else {
-                iterator prev = pos;
+                const_iterator prev = pos;
                 --prev;
                 if (pos.node_->left == nullptr) {
                     pos.node_->left = p;
@@ -419,12 +424,14 @@ namespace mystl {
                 size_ = 1;
                 return iterator(p);
             }
-            if (pos == cbegin() && comp_(value, *pos)) {
-                return insert_at_pos(pos, value);
+            if (pos == cbegin()) {
+                if (comp_(key_of_value_(value), key_of_value_(*pos)))
+                    return insert_at_pos(pos, value);
             }else {
-                iterator prev = pos;
+                const_iterator prev = pos;
                 --prev;
-                if (comp_(*prev, value) && (pos == cend() ? true : comp_(value, *pos))) {
+                if (comp_(key_of_value_(*prev), key_of_value_(value)) && 
+                    (pos == cend() ? true : comp_(key_of_value_(value), key_of_value_(*pos)))) {
                     return insert_at_pos(pos, value);
                 }
             }
@@ -445,17 +452,18 @@ namespace mystl {
                 size_ = 1;
                 return iterator(p);
             }
-            value_type insert_value(mystl::move(value));
-            if (pos == cbegin() && comp_(insert_value, *pos)) {
-                return insert_at_pos(pos, insert_value);
+            if (pos == cbegin()) {
+                if (comp_(key_of_value_(value), key_of_value_(*pos)))
+                    return insert_at_pos(pos, mystl::move(value));
             }else {
-                iterator prev = pos;
+                const_iterator prev = pos;
                 --prev;
-                if (comp_(*prev, insert_value) && (pos == cend() ? true : comp_(insert_value, *pos))) {
-                    return insert_at_pos(pos, insert_value);
+                if (comp_(key_of_value_(*prev), key_of_value_(value)) && 
+                    (pos == cend() ? true : comp_(key_of_value_(value), key_of_value_(*pos)))) {
+                    return insert_at_pos(pos, mystl::move(value));
                 }
             }
-            return emplace_unique(insert_value).first;
+            return emplace_unique(mystl::move(value)).first;
         }
 
 
@@ -530,7 +538,7 @@ namespace mystl {
             other.reset_empty();
         }
 
-        constexpr void copy_tree(rb_tree& other) {
+        constexpr void copy_tree(const rb_tree& other) {
             if (this == &other) return;
             if (other.size_ == 0) {
                 clear();
@@ -589,7 +597,7 @@ namespace mystl {
             right_son->left = node;
             right_son->parent = parent;
 
-            if (is_header(parent)) {
+            if (parent == &header_) {
                 header_.parent = right_son;
             }else if (node == parent->left) {
                 parent->left = right_son;
@@ -611,7 +619,7 @@ namespace mystl {
             left_son->right = node;
             left_son->parent = parent;
 
-            if (is_header(parent)) {
+            if (parent == &header_) {
                 header_.parent = left_son;
             }else if (node == parent->left) {
                 parent->left = left_son;
@@ -623,11 +631,11 @@ namespace mystl {
         // *************************************************************************************
         // rebalance
         constexpr void rebalance_after_insert(rb_node_base* node) noexcept {
-            while (node->parent->color == Color::RED && node->parent != header_.parent) {
+            while (node != header_.parent && node->parent->color == Color::RED) {
                 if (node->parent->parent->left == node->parent) {
                     node_type* uncle = node->parent->parent->right;
-                    if (uncle->color == Color::RED) {
-                        uncle->color == Color::BLACK;
+                    if (uncle && uncle->color == Color::RED) {
+                        uncle->color = Color::BLACK;
                         node->parent->color = Color::BLACK;
                         node->parent->parent->color = Color::RED;
                         node = node->parent->parent;
@@ -642,8 +650,8 @@ namespace mystl {
                     }
                 }else {
                     node_type* uncle = node->parent->parent->left;
-                    if (uncle->color == Color::RED) {
-                        uncle->color == Color::BLACK;
+                    if (uncle && uncle->color == Color::RED) {
+                        uncle->color = Color::BLACK;
                         node->parent->color = Color::BLACK;
                         node->parent->parent->color = Color::RED;
                         node = node->parent->parent;
