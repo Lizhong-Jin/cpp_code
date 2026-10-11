@@ -655,10 +655,7 @@ namespace mystl {
                 auto* actual = static_cast<node_type*>(node);
                 node_alloc_traits::destroy(node_alloc_, actual);
                 node_alloc_traits::deallocate(node_alloc_, actual, 1); 
-                header_.parent = nullptr;
-                header_.left = &header_;
-                header_.right = &header_;
-                size_ = 0;
+                reset_empty();
                 return;
             }
             // if both of the two child of node are not nullptr
@@ -683,7 +680,7 @@ namespace mystl {
                     if (node->parent->left == node) {
                         node->parent->left = nullptr;
                     }else {
-                        node->parent->right == nullptr;
+                        node->parent->right = nullptr;
                     }
                 }else {
                     // mark node as double black
@@ -781,17 +778,24 @@ namespace mystl {
             return p;
         }
 
-        // replace the position of "target" with "node" in rb_tree
-        constexpr void replace_node(const rb_node_base* target, rb_node_base* node) noexcept {
-            node->copy_ptr(*target);
-            if (target->parent->left == target) {
-                target->parent->left = node;
-            }else {
-                target->parent->right = node;
-            }
-            if (header_.parent == target) {
-                header_.parent = node;
-            }
+        void transplant(rb_node_base* old_node, rb_node_base* replacement) noexcept {
+            auto* parent = old_node->parent;
+
+            if (parent == &header_)
+                header_.parent = replacement;
+            else if (parent->left == old_node)
+                parent->left = replacement;
+            else
+                parent->right = replacement;
+
+            if (replacement)
+                replacement->parent = parent;
+        }
+
+        // replace the position of "old_node" with "replacement" in rb_tree
+        constexpr void replace_node(rb_node_base* old_node, rb_node_base* replacement) noexcept {
+            replacement->copy_ptr(*old_node);
+            transplant(old_node, replacement);
         }
 
         // swap pointer and position of two node
