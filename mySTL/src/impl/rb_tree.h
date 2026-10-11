@@ -37,6 +37,12 @@ namespace mystl {
 
         constexpr rb_node_base(rb_node_base&& other) 
             : color(other.color), parent(other.parent), left(other.left), right(other.right) {}
+
+        constexpr void copy_ptr(rb_node_base& other) noexcept {
+            parent = other.parent;
+            left = other.left;
+            right = other.right;
+        }
     }; // class rb_node_base
 
     // Basic node in rb tree
@@ -272,7 +278,7 @@ namespace mystl {
             if (other.size_ > max_size())
                 throw mystl::length_error("rb_tree move exceeds max_size");
             try {
-                Guard_subtree guard(*this, clone_moving_subtree(other));
+                Guard_subtree guard(*this, clone_moving_subtree(other.header_.parent, &header_));
                 auto* left = minimum(guard.root);
                 auto* right = maximum(guard.root);
 
@@ -416,6 +422,9 @@ namespace mystl {
     private:
         template <typename... Args>
         constexpr iterator insert_at_pos(const_iterator pos, Args&&... args) {
+            if (size_ >= max_size())
+                throw mystl::length_error("rb_tree cannot be larger than max_size()");
+
             Guard_subtree guard(*this, create_node(mystl::forward<Args>(args)...));
             auto* p = guard.release();
             p->color = Color::RED;
@@ -432,7 +441,7 @@ namespace mystl {
                 p->parent = old_tail;
                 header_.right = p;
             }else {
-                iterator fa = pos;
+                iterator fa(const_cast<rb_node_base*>(pos.node_));
                 if (pos.node_->left == nullptr) {
                     fa.node_->left = p;
                     p->parent = fa.node_;
@@ -459,8 +468,6 @@ namespace mystl {
         }
 
         constexpr iterator insert_unique(const_iterator pos, const value_type& value) {
-            if (size_ >= max_size())
-                throw mystl::length_error("rb_tree cannot be larger than max_size()");
             if (size_ == 0) {
                 Guard_subtree guard(*this, create_node(value));
                 auto* p = guard.release();
@@ -487,8 +494,6 @@ namespace mystl {
         }
 
         constexpr iterator insert_unique(const_iterator pos, value_type&& value) {
-            if (size_ >= max_size())
-                throw mystl::length_error("rb_tree cannot be larger than max_size()");
             if (size_ == 0) {
                 Guard_subtree guard(*this, create_node(mystl::move(value)));
                 auto* p = guard.release();
@@ -512,6 +517,15 @@ namespace mystl {
                 }
             }
             return emplace_unique(mystl::move(value)).first;
+        }
+
+        // erase
+        constexpr iterator erase(const_iterator pos) {
+            assert (size_ != 0 && pos != cend());
+            iterator post = iterator(const_cast<rb_node_base*>(pos.node_));
+            ++post;
+            erase_node(pos.node_);
+            return post;
         }
 
 
@@ -635,16 +649,157 @@ namespace mystl {
             return guard.release();
         }
 
-        static rb_node_base* minimum(rb_node_base* p) noexcept {
+        // erase one node in rb_tree
+        constexpr void erase_node(rb_node_base* node) {
+            if (size_ == 1) {
+                auto* actual = static_cast<node_type*>(node);
+                node_alloc_traits::destroy(node_alloc_, actual);
+                node_alloc_traits::deallocate(node_alloc_, actual, 1); 
+                header_.parent = nullptr;
+                header_.left = &header_;
+                header_.right = &header_;
+                size_ = 0;
+                return;
+            }
+            // if both of the two child of node are not nullptr
+            // swap pointer with its succeed node
+            if (node->left && node->right) {
+                rb_node_base* succeed_node = minimum(node->right);
+                swap_node(node, succeed_node);
+                mystl::swap(node->color, succeed_node->color);
+            }
+            // if the node to be deleted has only one non-null child,
+            // then this node must be black and its child must be red.
+            // simply replace it with the child node.
+            if (node->left || node->right) {
+                rb_node_base* sub_node = node->left ? node->left : node->right;
+                sub_node->color = Color::BLACK;
+                replace_node(node, sub_node);
+            }
+            // if node is a leaf.
+            else {
+                // if node's color is red
+                if (node->color == Color::RED) {
+                    if (node->parent->left == node) {
+                        node->parent->left = nullptr;
+                    }else {
+                        node->parent->right == nullptr;
+                    }
+                }else {
+                    // mark node as double black
+                    rb_node_base* double_black = node;
+                    // adjust the rb_tree and remove the double black mark
+                    while (double_black != header_.parent && double_black->color == Color::BLACK) {
+                        rb_node_base* parent = double_black->parent;
+                        if (parent->left == double_black) {
+                            rb_node_base* bro = parent->right;
+                            if (bro && bro->color == Color::RED) {
+                                bro->color = Color::BLACK;
+                                parent->color = Color::RED;
+                                left_rotate(parent);
+                                bro = parent->right;
+                            }
+                            if ((!bro->left || bro->left->color == Color::BLACK) 
+                                && (!bro->right || bro->right->color == Color::BLACK)){
+                                if (parent->color == Color::RED) {
+                                    parent->color = Color::BLACK;
+                                    bro->color = Color::RED;
+                                    double_black = header_.parent;
+                                }else {
+                                    bro->color = Color::RED;
+                                    double_black = parent;
+                                }
+                            }else {
+                                if (!bro->right || bro->right->color == Color::BLACK) {
+                                    bro->color = Color::RED;
+                                    bro->left->color = Color::BLACK;
+                                    right_rotate(bro);
+                                    bro = parent->right;
+                                }
+                                bro->color = parent->color;
+                                parent->color = Color::BLACK;
+                                bro->right->color = Color::BLACK;
+                                left_rotate(parent);
+                                double_black = header_.parent;
+                            }
+                        }else {
+                            rb_node_base* bro = parent->left;
+                            if (bro && bro->color == Color::RED) {
+                                bro->color = Color::BLACK;
+                                parent->color = Color::RED;
+                                right_rotate(parent);
+                                bro = parent->left;
+                            }
+                            if ((!bro->left || bro->left->color == Color::BLACK) 
+                                && (!bro->right || bro->right->color == Color::BLACK)){
+                                if (parent->color == Color::RED) {
+                                    parent->color = Color::BLACK;
+                                    bro->color = Color::RED;
+                                    double_black = header_.parent;
+                                }else {
+                                    bro->color = Color::RED;
+                                    double_black = parent;
+                                }
+                            }else {
+                                if (!bro->left || bro->left->color == Color::BLACK) {
+                                    bro->color = Color::RED;
+                                    bro->right->color = Color::BLACK;
+                                    left_rotate(bro);
+                                    bro = parent->left;
+                                }
+                                bro->color = parent->color;
+                                parent->color = Color::BLACK;
+                                bro->left->color = Color::BLACK;
+                                right_rotate(parent);
+                                double_black = header_.parent;
+                            }
+                        }
+                    }
+                    if (node->parent->left == node) {
+                        node->parent->left = nullptr;
+                    }else {
+                        node->parent->right = nullptr;
+                    }
+                    header_.parent->color = Color::BLACK;
+                }
+            }
+            --size_;
+            auto* actual = static_cast<node_type*>(node);
+            node_alloc_traits::destroy(node_alloc_, actual);
+            node_alloc_traits::deallocate(node_alloc_, actual, 1);  
+        }
+
+        static constexpr rb_node_base* minimum(rb_node_base* p) noexcept {
             while (p->left)
                 p = p->left;
             return p;
         }
 
-        static rb_node_base* maximum(rb_node_base* p) noexcept {
+        static constexpr rb_node_base* maximum(rb_node_base* p) noexcept {
             while (p->right)
                 p = p->right;
             return p;
+        }
+
+        // replace the position of "target" with "node" in rb_tree
+        constexpr void replace_node(const rb_node_base* target, rb_node_base* node) noexcept {
+            node->copy_ptr(*target);
+            if (target->parent->left == target) {
+                target->parent->left = node;
+            }else {
+                target->parent->right = node;
+            }
+            if (header_.parent == target) {
+                header_.parent = node;
+            }
+        }
+
+        // swap pointer and position of two node
+        constexpr void swap_node(rb_node_base* lhs, rb_node_base* rhs) noexcept {
+            rb_node_base* tmp;
+            replace_node(lhs, tmp);
+            replace_node(rhs, lhs);
+            replace_node(tmp, rhs);
         }
 
         // *************************************************************************************
