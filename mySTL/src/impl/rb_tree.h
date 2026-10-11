@@ -807,12 +807,6 @@ namespace mystl {
                 replacement->parent = parent;
         }
 
-        // replace the position of "old_node" with "replacement" in rb_tree
-        constexpr void replace_node(rb_node_base* old_node, rb_node_base* replacement) noexcept {
-            replacement->copy_ptr(*old_node);
-            transplant(old_node, replacement);
-        }
-
         // swap pointer and position of two node
         constexpr void swap_node(rb_node_base* lhs, rb_node_base* rhs) noexcept {
             rb_node_base tmp;
