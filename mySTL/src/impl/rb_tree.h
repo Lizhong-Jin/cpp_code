@@ -522,15 +522,15 @@ namespace mystl {
         // erase
         constexpr iterator erase(const_iterator pos) {
             assert (size_ != 0 && pos != cend());
-            iterator post = iterator(const_cast<rb_node_base*>(pos.node_));
+            auto* node = const_cast<rb_node_base*>(pos.node_);
+            iterator post(node);
             ++post;
-            erase_node(pos.node_);
+            erase_node(node);
             return post;
         }
 
 
         
-
 
 
     private:
@@ -658,6 +658,16 @@ namespace mystl {
                 reset_empty();
                 return;
             }
+            rb_node_base* new_begin = nullptr;
+            rb_node_base* new_tail = nullptr;
+            if (header_.left == node) {
+                new_begin = node;
+                ++new_begin;
+            }
+            if (header_.right == node) {
+                new_tail = node;
+                --new_tail;
+            }
             // if both of the two child of node are not nullptr
             // swap pointer with its succeed node
             if (node->left && node->right) {
@@ -671,7 +681,7 @@ namespace mystl {
             if (node->left || node->right) {
                 rb_node_base* sub_node = node->left ? node->left : node->right;
                 sub_node->color = Color::BLACK;
-                replace_node(node, sub_node);
+                transplant(node, sub_node);
             }
             // if node is a leaf.
             else {
@@ -761,9 +771,14 @@ namespace mystl {
                 }
             }
             --size_;
+            if (new_begin) {
+                header_.left = new_begin;
+            }else if (new_tail) {
+                header_.right = new_tail;
+            }
             auto* actual = static_cast<node_type*>(node);
             node_alloc_traits::destroy(node_alloc_, actual);
-            node_alloc_traits::deallocate(node_alloc_, actual, 1);  
+            node_alloc_traits::deallocate(node_alloc_, actual, 1);
         }
 
         static constexpr rb_node_base* minimum(rb_node_base* p) noexcept {
@@ -800,10 +815,13 @@ namespace mystl {
 
         // swap pointer and position of two node
         constexpr void swap_node(rb_node_base* lhs, rb_node_base* rhs) noexcept {
-            rb_node_base* tmp;
-            replace_node(lhs, tmp);
-            replace_node(rhs, lhs);
-            replace_node(tmp, rhs);
+            rb_node_base tmp;
+            tmp.copy_ptr(lhs);
+            transplant(lhs, &tmp);
+            lhs->copy_ptr(rhs);
+            transplant(rhs, lhs);
+            rhs->copy_ptr(&tmp);
+            transplant(&tmp, rhs);
         }
 
         // *************************************************************************************
