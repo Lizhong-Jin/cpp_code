@@ -38,7 +38,7 @@ namespace mystl {
     template<typename T> struct is_swappable;
     template<typename T> struct is_nothrow_swappable;
 
-    template <class T, size_t N>
+    template <typename T, size_t N>
         requires is_swappable<T>::value
     constexpr void swap(T(&lhs)[N], T(&rhs)[N]) noexcept(is_nothrow_swappable<T>::value) {
         using mystl::swap;

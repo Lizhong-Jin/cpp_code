@@ -6,6 +6,7 @@
 #include <cassert>
 #include <cstddef>
 #include <limits>
+#include <optional>
 
 #include "../utility.h"
 #include "../functional.h"
@@ -48,7 +49,7 @@ namespace mystl {
     // Basic node in rb tree
     // Only responsible for constructing the value. 
     // The pointers and colors are constructed by the rb tree.
-    template<class Value>
+    template<typename Value>
     struct rb_node : rb_node_base {
         using value_type = Value;
 
@@ -65,10 +66,123 @@ namespace mystl {
         rb_node& operator=(rb_node&&) = delete;
     }; // calss rb_node
 
+    template<typename Key, typename Value, typename KeyOfValue, typename Compare, typename Allocator>
+    class rb_tree;
+
+    template<typename Value, typename Allocator>
+    class rb_node_handle {
+        template<typename, typename, typename, typename, typename>
+        friend class rb_tree;
+
+        using alloc_traits = mystl::allocator_traits<Allocator>;
+        using raw_node = rb_node<Value>;
+
+        using node_allocator = typename alloc_traits::template rebind_alloc<raw_node>;
+        using node_traits = mystl::allocator_traits<node_allocator>;
+
+        static_assert(mystl::is_same_v<typename Allocator::value_type, Value>);
+        static_assert(mystl::is_same_v<typename node_traits::pointer, raw_node*>);
+
+        std::optional<Allocator> alloc_;
+        raw_node* ptr_ = nullptr;
+
+        // 仅允许 rb_tree 接管一个已经摘除、断开链接的节点。
+        rb_node_handle(raw_node* p, const Allocator& alloc) noexcept
+            : alloc_(alloc), ptr_(p)
+        {
+            assert(p && !p->parent && !p->left && !p->right);
+        }
+
+        // 使用自己的 allocator 销毁节点。
+        // 保留 alloc_，供移动赋值判断 allocator 是否传播。
+        void destroy_node() noexcept {
+            if (!ptr_) return;
+
+            node_allocator alloc(*alloc_);
+            node_traits::destroy(alloc, ptr_);
+            node_traits::deallocate(alloc, ptr_, 1);
+            ptr_ = nullptr;
+        }
+
+        raw_node* get() const noexcept {
+            return ptr_;
+        }
+
+        // 只转移所有权，不销毁节点。
+        [[nodiscard]] raw_node* release() noexcept {
+            auto* p = ptr_;
+            ptr_ = nullptr;
+            alloc_.reset();
+            return p;
+        }
+
+    public:
+        using value_type = Value;
+        using allocator_type = Allocator;
+
+        rb_node_handle() noexcept = default;
+
+        rb_node_handle(const rb_node_handle&) = delete;
+        rb_node_handle& operator=(const rb_node_handle&) = delete;
+
+        rb_node_handle(rb_node_handle&& other) noexcept
+            : alloc_(mystl::move(other.alloc_)),
+            ptr_(other.ptr_)
+        {
+            other.ptr_ = nullptr;
+            other.alloc_.reset();
+        }
+
+        rb_node_handle& operator=(rb_node_handle&& other) noexcept {
+            if (this == &other)
+                return *this;
+
+            constexpr bool propagate =
+                alloc_traits::propagate_on_container_move_assignment::value;
+
+            // 目标没有 allocator，或允许传播，或双方 allocator 相等。
+            assert(!alloc_ || propagate || (other.alloc_ && *alloc_ == *other.alloc_));
+
+            // 必须先用旧 allocator 释放旧节点。
+            destroy_node();
+
+            if (!alloc_ || propagate)
+                alloc_ = mystl::move(other.alloc_);
+
+            ptr_ = other.ptr_;
+
+            other.ptr_ = nullptr;
+            other.alloc_.reset();
+            return *this;
+        }
+
+        ~rb_node_handle() noexcept {
+            destroy_node();
+        }
+
+        [[nodiscard]] bool empty() const noexcept {
+            return ptr_ == nullptr;
+        }
+
+        explicit operator bool() const noexcept {
+            return !empty();
+        }
+
+        value_type& value() const noexcept {
+            assert(ptr_);
+            return ptr_->value;
+        }
+
+        allocator_type get_allocator() const noexcept {
+            assert(ptr_ && alloc_);
+            return *alloc_;
+        }
+    };
+
 
     // rb tree
-    // header_ is always RED
-    // The root of non-empty tree is always BLACK.
+    // header_ is always be RED
+    // The root of non-empty tree is always be BLACK.
     // root->parent == &header_
     // header_.parent == root
     template <typename Key, typename Value, typename KeyOfValue, 
