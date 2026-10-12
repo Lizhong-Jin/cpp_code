@@ -195,6 +195,31 @@ namespace mystl {
         return mystl::pair<T1, T2>(mystl::forward<T1>(first), mystl::forward<T2>(second));
     }
 
+    // is_swappable && is_nothrow_swappable
+    namespace detail {
+        using mystl::swap;
+
+        template<typename T>
+        concept swappable = requires(T& a, T& b) {
+            { swap(a, b) };
+        };
+        template<typename T>
+        concept nothrow_swappable = requires(T& a, T& b) {
+            { swap(a, b) } noexcept;
+        };
+    }
+    template<typename T>
+    struct is_swappable : bool_constant<detail::swappable<T>> {};
+    template<typename T>
+    inline constexpr bool is_swappable_v = is_swappable<T>::value;
+
+    template<typename T>
+    struct is_nothrow_swappable : bool_constant<detail::nothrow_swappable<T>> {};
+    template<typename T>
+    inline constexpr bool is_nothrow_swappable_v = is_nothrow_swappable<T>::value;
+
+    
+
 } // namespace mystl
 
 #endif //UTILITY_H

@@ -649,7 +649,9 @@ namespace mystl {
 
         // swap
         constexpr void swap(rb_tree& other) 
-            noexcept(noexcept(swap(comp_, other.comp_)))
+            noexcept(alloc_traits::is_always_equal::value &&
+                    mystl::is_nothrow_swappable_v<Compare> &&
+                    mystl::is_nothrow_swappable_v<KeyOfValue>)
         {
             if (this == &other) return;
             using mystl::swap;
