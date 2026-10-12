@@ -34,10 +34,16 @@ namespace mystl {
         lhs = mystl::move(rhs);
         rhs = mystl::move(temp);
     };
+    // The array overload depends on element traits defined after the swap overloads.
+    template<typename T> struct is_swappable;
+    template<typename T> struct is_nothrow_swappable;
+
     template <class T, size_t N>
-    void swap(T(&lhs)[N], T(&rhs)[N]) noexcept(noexcept(mystl::swap(*lhs, *rhs))) {
-        for (int i=0; i<N; i++) {
-            mystl::swap(lhs[i], rhs[i]);
+        requires is_swappable<T>::value
+    constexpr void swap(T(&lhs)[N], T(&rhs)[N]) noexcept(is_nothrow_swappable<T>::value) {
+        using mystl::swap;
+        for (size_t i = 0; i < N; ++i) {
+            swap(lhs[i], rhs[i]);
         }
     }
 

@@ -609,23 +609,25 @@ namespace mystl {
                 return iterator(p);
             }
             auto* p = guard.root;
-            if (pos == cbegin()) {
-                if (comp_(key_of_value_(p->value), key_of_value_(*hint)))
-                    return insert_at_pos(hint, guard.release());
+            if (hint == cbegin()) {
+                if (comp_(key_of_value_(p->value), key_of_value_(*hint))) {
+                    auto result = insert_at_pos(hint, guard.root);
+                    (void)guard.release();
+                    return result;
+                }
             }else {
                 const_iterator prev = hint;
                 --prev;
                 if (comp_(key_of_value_(*prev), key_of_value_(p->value)) && 
-                    (pos == cend() ? true : comp_(key_of_value_(p->value), key_of_value_(*hint)))) {
-                    return insert_at_pos(hint, guard.release());
+                    (hint == cend() ? true : comp_(key_of_value_(p->value), key_of_value_(*hint)))) {
+                    auto result = insert_at_pos(hint, guard.root);
+                    (void)guard.release();
+                    return result;
                 }
             }
             iterator insert_pos = insert_node_unique(p);
-            p = guard.release();
-            if (insert_pos.node_ != p) {
-                node_alloc_traits::destroy(node_alloc_, p);
-                node_alloc_traits::deallocate(node_alloc_, p, 1);
-            }
+            if (insert_pos.node_ == p)
+                (void)guard.release();
             return insert_pos;
         }
 
@@ -647,11 +649,13 @@ namespace mystl {
             return 1;
         }
 
-        // swap
+        // Policy swaps must not throw: the policies must stay paired with their nodes.
         constexpr void swap(rb_tree& other) 
             noexcept(alloc_traits::is_always_equal::value &&
                     mystl::is_nothrow_swappable_v<Compare> &&
                     mystl::is_nothrow_swappable_v<KeyOfValue>)
+            requires (mystl::is_nothrow_swappable_v<Compare> &&
+                      mystl::is_nothrow_swappable_v<KeyOfValue>)
         {
             if (this == &other) return;
             using mystl::swap;
