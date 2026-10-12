@@ -730,22 +730,26 @@ namespace mystl {
         constexpr iterator insert_unique(const_iterator pos, node_type&& nh) {
             if (nh.empty()) return end();
             assert(get_allocator() == nh.get_allocator());
+            auto* node = nh.get();
             if (size_ == 0) {
                 iterator insert_pos = insert_node_unique(node);
                 (void)nh.release();
                 return insert_pos;
             }
-            auto* node = nh.get();
             if (pos == cbegin()) {
                 if (comp_(key_of_value_(node->value), key_of_value_(*pos))) {
-                    return insert_node_unique(node);
+                    iterator insert_pos = insert_node_unique(node);
+                    (void)nh.release();
+                    return insert_pos;
                 }
             }else {
                 const_iterator prev = pos;
                 --prev;
                 if (comp_(key_of_value_(*prev), key_of_value_(node->value)) && 
                     (pos == cend() ? true : comp_(key_of_value_(node->value), key_of_value_(*pos)))) {
-                    return insert_node_unique(node);
+                    iterator insert_pos = insert_node_unique(node);
+                    (void)nh.release();
+                    return insert_pos;
                 }
             }
             iterator insert_pos = insert_node_unique(node);
