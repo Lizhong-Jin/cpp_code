@@ -455,7 +455,81 @@ namespace mystl {
                 rebalance_after_insert(p);
             }
             return iterator(p);
-        }    
+        }
+
+        constexpr iterator insert_at_pos(const_iterator pos, node_type* node) {
+            if (size_ >= max_size())
+                throw mystl::length_error("rb_tree cannot be larger than max_size()");
+
+            node->color = Color::RED;
+            ++size_;
+            if (pos == cbegin()) {
+                rb_node_base* old_begin = header_.left;
+                old_begin->left = node;
+                node->parent = old_begin;
+                header_.left = node;
+            }else if (pos == cend()) {
+                rb_node_base* old_tail = header_.right;
+                old_tail->right = node;
+                node->parent = old_tail;
+                header_.right = node;
+            }else {
+                iterator fa(const_cast<rb_node_base*>(pos.node_));
+                if (pos.node_->left == nullptr) {
+                    fa.node_->left = node;
+                    node->parent = fa.node_;
+                }else {
+                    --fa;
+                    fa.node_->right = node;
+                    node->parent = fa.node_;
+                }
+            }
+            if (node->parent->color == Color::RED) {
+                rebalance_after_insert(node);
+            }
+            return iterator(node);
+        }
+
+        constexpr iterator insert_node_unique(node_type* node) {
+            node->color = Color::RED;
+
+            rb_node_base* cur = header_.parent;
+            rb_node_base* prev = &header_;
+            bool insert_left;
+            while (cur != nullptr) {
+                if (comp_(key_of_value_(node->value), key_of_value_(static_cast<node_type*>(cur)->value))) {
+                    prev = cur;
+                    cur = cur->left;
+                    insert_left = true;
+                }else if (comp_(key_of_value_(static_cast<node_type*>(cur)->value), key_of_value_(node->value))) {
+                    prev = cur;
+                    cur = cur->right;
+                    insert_left = false;
+                }else {
+                    return iterator(cur);
+                }
+            }
+            if (size_ >= max_size())
+                throw mystl::length_error("rb_tree cannot be larger than max_size()");
+
+            node->parent = prev;
+
+            if (insert_left) {
+                prev->left = node;
+                if (prev == header_.left)
+                    header_.left = node;
+            }else {
+                prev->right = node;
+                if (prev == header_.right)
+                    header_.right = node;
+            }
+            ++size_;
+            
+            if (prev->color == Color::RED) {
+                rebalance_after_insert(node);
+            }
+            return iterator(node);
+        }
 
     public:
         // insert_unique
@@ -519,6 +593,7 @@ namespace mystl {
             return emplace_unique(mystl::move(value)).first;
         }
 
+        // emplace_hint
         template <typename... Args>
         constexpr iterator emplace_hint(const_iterator hint, Args&&... args) {
             Guard_subtree guard(*this, create_node(mystl::forward<Args>(args)...));
@@ -536,16 +611,22 @@ namespace mystl {
             auto* p = guard.root;
             if (pos == cbegin()) {
                 if (comp_(key_of_value_(p->value), key_of_value_(*hint)))
-                    return insert_at_pos(pos, mystl::move(guard.release()->value));
+                    return insert_at_pos(hint, guard.release());
             }else {
-                const_iterator prev = pos;
+                const_iterator prev = hint;
                 --prev;
                 if (comp_(key_of_value_(*prev), key_of_value_(p->value)) && 
                     (pos == cend() ? true : comp_(key_of_value_(p->value), key_of_value_(*hint)))) {
-                    return insert_at_pos(pos, mystl::move(guard.release()->value));
+                    return insert_at_pos(hint, guard.release());
                 }
             }
-            return emplace_unique(mystl::move(guard.release()->value)).first;
+            iterator insert_pos = insert_node_unique(p);
+            p = guard.release();
+            if (insert_pos.node_ != p) {
+                node_alloc_traits::destroy(node_alloc_, p);
+                node_alloc_traits::deallocate(node_alloc_, p, 1);
+            }
+            return insert_pos;
         }
 
         // erase
@@ -571,8 +652,8 @@ namespace mystl {
             noexcept(noexcept(swap(comp_, other.comp_)))
         {
             if (this == &other) return;
+            using mystl::swap;
             if constexpr (alloc_traits::propagate_on_container_swap::value) {
-                using mystl::swap;
                 swap(node_alloc_, other.node_alloc_);
             }else {
                 assert(node_alloc_ == other.node_alloc_);
@@ -690,7 +771,7 @@ namespace mystl {
         // equal_range
         constexpr mystl::pair<iterator, iterator> equal_range(const Key& key) {
             iterator lhs = lower_bound(key);
-            if (lhs == end() || comp_(key, key_of_value_(static_cast<const node_type*>(lhs)->value))) {
+            if (lhs == end() || comp_(key, key_of_value_(*lhs))) {
                 return mystl::make_pair(lhs, lhs);
             }
             iterator rhs = lhs;
@@ -700,7 +781,7 @@ namespace mystl {
 
         constexpr mystl::pair<const_iterator, const_iterator> equal_range(const Key& key) const {
             const_iterator lhs = lower_bound(key);
-            if (lhs == end() || comp_(key, key_of_value_(static_cast<const node_type*>(lhs)->value))) {
+            if (lhs == end() || comp_(key, key_of_value_(*lhs))) {
                 return mystl::make_pair(lhs, lhs);
             }
             const_iterator rhs = lhs;
@@ -709,7 +790,7 @@ namespace mystl {
         }
 
         // observers
-        constexpr key_compare key_comp() {
+        constexpr key_compare key_comp() const {
             return comp_;
         }
         
