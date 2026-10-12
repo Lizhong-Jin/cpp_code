@@ -19,6 +19,7 @@ add_executable(mySTL main.cpp
         src/impl/uninitialized.h
         src/memory.h
         src/bitset.h
+        src/set.h
         src/impl/basic_string.h
         src/exception.h
         src/stdexcept.h
