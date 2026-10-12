@@ -62,8 +62,8 @@ rules.ninja
 /test/test
 /txt_read/test
 
-# Generated benchmark reports (keep other CSV data trackable)
-vector-benchmark.csv
+# Generated CSV files in any directory (case-insensitive extension)
+*.[cC][sS][vV]
 
 # Generated images
 /simple graphic/Image_save/
