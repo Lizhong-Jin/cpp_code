@@ -9,6 +9,7 @@
 #include <array>
 #include <atomic>
 #include <chrono>
+#include <cmath>
 #include <cstdint>
 #include <deque>
 #include <fstream>
@@ -30,8 +31,8 @@ constexpr std::size_t middle_limit = 8192;
 constexpr std::size_t middle_cycles = 128;
 constexpr unsigned seed = 20261007;
 
-// Each mystl block contains one of these; compare the real default block
-// policies rather than forcing std::deque to use the same block size.
+// A 512-byte payload. Print the actual block policy for each type below;
+// key reads touch only words[0], payload reads consume every word.
 struct LargeValue {
     std::array<std::uint64_t, 64> words{};
     explicit LargeValue(std::uint64_t value = 0) {
@@ -44,7 +45,8 @@ static_assert(sizeof(LargeValue) == 512);
 enum class Operation {
     range_construct, copy_construct, push_back, push_front, push_both,
     pop_back, pop_front, queue_cycle, iterate, random_read, middle_cycle,
-    insert_fill, insert_range, erase_range, assign_reuse, resize_grow, resize_shrink
+    insert_fill, insert_range, erase_range, assign_reuse, resize_grow, resize_shrink,
+    iterate_lanes, random_lanes, iterate_payload, random_payload, assign_preallocated
 };
 struct Case { const char* name; Operation operation; };
 constexpr Case cases[] = {
@@ -58,11 +60,16 @@ constexpr Case cases[] = {
     {"queue/pop_push", Operation::queue_cycle},
     {"read/iterate", Operation::iterate},
     {"read/random", Operation::random_read},
+    {"read/iterate_4lane", Operation::iterate_lanes},
+    {"read/random_4lane", Operation::random_lanes},
+    {"read/iterate_payload", Operation::iterate_payload},
+    {"read/random_payload", Operation::random_payload},
     {"middle/insert_erase", Operation::middle_cycle},
     {"insert/fill_batch", Operation::insert_fill},
     {"insert/range_batch", Operation::insert_range},
     {"erase/middle_range", Operation::erase_range},
     {"assign/same_size", Operation::assign_reuse},
+    {"assign/preallocated", Operation::assign_preallocated},
     {"resize/grow", Operation::resize_grow},
     {"resize/shrink", Operation::resize_shrink},
 };
@@ -97,6 +104,55 @@ void observe(std::uint64_t& hash, std::uint64_t value) {
     hash = (hash ^ value) * 1099511628211ull;
 }
 
+
+std::uint64_t payload_key(int value) { return key(value); }
+std::uint64_t payload_key(const LargeValue& value) {
+    std::uint64_t sum = 0;
+    for (auto word : value.words) sum += word;
+    return sum;
+}
+std::uint64_t payload_key(const std::string& value) {
+    std::uint64_t sum = 0;
+    for (unsigned char ch : value) sum += ch;
+    return sum;
+}
+
+// Four independent accumulators reduce the serial dependency of the original
+// observation hash. Keep the original cases for comparison with older reports.
+template<bool Random, bool Payload, class D>
+std::uint64_t read_lanes(const D& d, const std::vector<std::size_t>& indices) {
+    std::array<std::uint64_t, 4> sums{};
+    auto read = [](const auto& value) {
+        if constexpr (Payload) return payload_key(value);
+        else return key(value);
+    };
+    for (unsigned pass = 0; pass < read_passes; ++pass) {
+        keep_memory(&d);
+        auto it = d.begin();
+        std::size_t i = 0;
+        for (; i + 4 <= indices.size(); i += 4) {
+            if constexpr (Random) {
+                sums[0] += read(d[indices[i]]);
+                sums[1] += read(d[indices[i + 1]]);
+                sums[2] += read(d[indices[i + 2]]);
+                sums[3] += read(d[indices[i + 3]]);
+            } else {
+                sums[0] += read(*it++);
+                sums[1] += read(*it++);
+                sums[2] += read(*it++);
+                sums[3] += read(*it++);
+            }
+        }
+        for (; i < indices.size(); ++i) {
+            if constexpr (Random) sums[0] += read(d[indices[i]]);
+            else sums[0] += read(*it++);
+        }
+    }
+    std::uint64_t result = 1469598103934665603ull;
+    for (auto sum : sums) observe(result, sum);
+    return result;
+}
+
 template<class D>
 struct Sample {
     std::optional<D> values;
@@ -129,6 +185,10 @@ Sample<D> run(Operation operation, const std::vector<T>& input, std::size_t n,
         result.values.emplace();
     } else if (operation == Operation::assign_reuse) {
         result.values.emplace(n, T{});
+    } else if (operation == Operation::assign_preallocated) {
+        result.values.emplace(input.data(), input.data() + n);
+        // Different content, same payload size; string buffers exist before timing.
+        for (std::size_t i = 0; i < n; ++i) (*result.values)[i] = input[(i + 1) % n];
     } else {
         const auto initial = operation == Operation::resize_grow ? n / 2 : n;
         result.values.emplace(input.data(), input.data() + initial);
@@ -174,6 +234,10 @@ Sample<D> run(Operation operation, const std::vector<T>& input, std::size_t n,
                     for (auto i : indices) observe(result.observed, key(d[i]));
                 }
                 break;
+            case Operation::iterate_lanes: result.observed = read_lanes<false, false>(d, indices); break;
+            case Operation::random_lanes: result.observed = read_lanes<true, false>(d, indices); break;
+            case Operation::iterate_payload: result.observed = read_lanes<false, true>(d, indices); break;
+            case Operation::random_payload: result.observed = read_lanes<true, true>(d, indices); break;
             case Operation::middle_cycle:
                 for (std::size_t i = 0; i < middle_cycles; ++i) {
                     auto it = d.insert(d.begin() + n / 2, input[i % n]);
@@ -192,6 +256,7 @@ Sample<D> run(Operation operation, const std::vector<T>& input, std::size_t n,
                 d.erase(d.begin() + n / 4, d.begin() + n / 2);
                 break;
             case Operation::assign_reuse:
+            case Operation::assign_preallocated:
                 d.assign(input.data(), input.data() + n);
                 break;
             case Operation::resize_grow: d.resize(n); break;
@@ -222,6 +287,12 @@ double median(std::vector<double> values) {
     return values.size() % 2 ? values[mid] : (values[mid - 1] + values[mid]) / 2;
 }
 
+double relative_mad(const std::vector<double>& samples, double center) {
+    std::vector<double> deviations;
+    for (double value : samples) deviations.push_back(std::abs(value - center));
+    return center > 0 ? 100 * median(deviations) / center : 0;
+}
+
 struct Options {
     std::size_t size = 100000;
     unsigned repeats = 7;
@@ -230,6 +301,9 @@ struct Options {
 
 template<class T>
 void compare(const char* type, const std::vector<T>& input, const Options& options, std::ostream* csv) {
+    std::cout << "type_info=" << type << ", sizeof(T)=" << sizeof(T)
+              << ", mystl_block_elements=" << mystl::deque_block_size<T>
+              << ", mystl_block_bytes=" << mystl::deque_block_size<T> * sizeof(T) << '\n';
     for (const auto& test : cases) {
         if (options.test != "all" && options.test != test.name) continue;
         const auto n = test.operation == Operation::middle_cycle
@@ -263,6 +337,7 @@ void compare(const char* type, const std::vector<T>& input, const Options& optio
         std::cout << std::left << std::setw(11) << type << std::setw(23) << test.name
                   << std::right << std::setw(9) << n << std::fixed << std::setprecision(3)
                   << std::setw(14) << a << std::setw(14) << b << std::setw(11) << (b > 0 ? a / b : 0)
+                  << std::setw(12) << relative_mad(mine, a) << std::setw(12) << relative_mad(standard, b)
                   << std::endl;
     }
 }
@@ -334,9 +409,15 @@ int main(int argc, char** argv) {
         std::cout << "Median microseconds; ratio=mystl/std (>1 means mystl takes longer).\n"
                      "Setup, full verification and final destruction excluded; operation allocations included.\n"
                      "Read/pop/queue/middle loops include lightweight observation of values.\n"
+                     "Original reads use a serial hash; *_4lane uses four independent sums.\n"
+                     "Key reads: int value, string length/end chars, large512 first word.\n"
+                     "*_payload reads every string byte / large512 word using four lanes.\n"
+                     "assign/same_size starts with default values; preallocated reuses payload storage.\n"
+                     "MAD% is median absolute deviation / median; sub-microsecond differences need batching.\n"
                   << std::left << std::setw(11) << "type" << std::setw(23) << "case"
                   << std::right << std::setw(9) << "n" << std::setw(14) << "mystl_us"
-                  << std::setw(14) << "std_us" << std::setw(11) << "ratio" << '\n';
+                  << std::setw(14) << "std_us" << std::setw(11) << "ratio"
+                  << std::setw(12) << "my_mad%" << std::setw(12) << "std_mad%" << '\n';
         auto* output = csv.is_open() ? &csv : nullptr;
         if (options.type == "all" || options.type == "int") {
             std::vector<int> input(options.size);
@@ -363,7 +444,7 @@ int main(int argc, char** argv) {
             csv.flush();
             if (!csv) throw std::runtime_error("failed writing CSV");
         }
-        std::cout << "All paired element and observation checks passed.\n";
+        std::cout << "All paired final-state and observation checks passed (not a substitute for regression tests).\n";
     } catch (const std::exception& error) {
         std::cerr << "benchmark error: " << error.what() << '\n';
         return 1;

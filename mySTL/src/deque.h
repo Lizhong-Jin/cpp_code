@@ -425,6 +425,43 @@ namespace mystl {
             swap(M_map_allocator, other.M_map_allocator);
         }
 
+        // Single end insertion transaction. Destroy the block/object guards
+        // before this guard so rollback can restore the original map verbatim.
+        struct Guard_map {
+            deque_base& owner;
+            map_pointer old_map;
+            size_type old_capacity;
+            iterator old_start;
+            iterator old_finish;
+            bool active = true;
+
+            explicit Guard_map(deque_base& d)
+                : owner(d), old_map(d.M_map), old_capacity(d.M_map_size),
+                  old_start(d.M_start), old_finish(d.M_finish) {
+                if (!owner.M_map) owner.M_initialize_map(0);
+            }
+            Guard_map(const Guard_map&) = delete;
+            Guard_map& operator=(const Guard_map&) = delete;
+
+            // Called at most once per transaction; the old map stays allocated.
+            void reserve(bool at_front) { owner.M_reserve_map(1, at_front, true); }
+
+            ~Guard_map() noexcept {
+                if (!active || owner.M_map == old_map) return;
+                if (old_map) owner.M_deallocate_map(owner.M_map, owner.M_map_size);
+                else owner.M_release_storage(); // includes the initial empty block
+                owner.M_map = old_map;
+                owner.M_map_size = old_capacity;
+                owner.M_start = old_start;
+                owner.M_finish = old_finish;
+            }
+            void release() noexcept {
+                if (old_map && owner.M_map != old_map)
+                    owner.M_deallocate_map(old_map, old_capacity);
+                active = false;
+            }
+        };
+
     private:
         T_alloc_type M_allocator;
         Map_alloc_type M_map_allocator;
@@ -467,7 +504,7 @@ namespace mystl {
             other.M_finish = iterator();
         }
 
-        void M_reserve_map(size_type extra, bool at_front) {
+        void M_reserve_map(size_type extra, bool at_front, bool retain_old = false) {
             if (extra == 0) return;
             // Reuse moved-from bases through M_initialize_map(0) first.
             assert(M_map != nullptr);
@@ -481,7 +518,9 @@ namespace mystl {
                 throw mystl::length_error("deque map is too large");
             const size_type needed = used + extra + 2;
             size_type capacity = M_map_size;
-            if (capacity < needed) {
+            // Recentering a nearly full map would copy all pointers again after
+            // just a few queue operations. Require proportional spare capacity.
+            if (capacity < needed || capacity / 2 < used + extra) {
                 capacity = capacity > limit / 2 ? limit : capacity * 2;
                 if (capacity < needed) capacity = needed;
             }
@@ -493,7 +532,7 @@ namespace mystl {
             iterator start(map + first, static_cast<size_type>(M_start._cur - M_start._first));
             iterator finish(map + first + used - 1,
                             static_cast<size_type>(M_finish._cur - M_finish._first));
-            M_deallocate_map(M_map, M_map_size);
+            if (!retain_old) M_deallocate_map(M_map, M_map_size);
             M_map = map;
             M_map_size = capacity;
             M_start = start;
@@ -504,8 +543,7 @@ namespace mystl {
     
 
     // *************************************************************************************
-    // Container interface scaffold. Element construction and modifiers are not
-    // implemented yet; do not expose the base's raw-size constructor as a deque ctor.
+    // Container manages live elements; the base owns their raw block storage.
     template <typename T, typename Allocator = mystl::allocator<T>>
     class deque : protected deque_base<T, Allocator> {
         static_assert(is_same_v<remove_cv_t<T>, T>,
@@ -867,6 +905,41 @@ namespace mystl {
             constexpr void release() noexcept { first = last; }
         };
 
+        // Keep allocation and rollback work out of the ordinary insertion path.
+        template <typename... Args>
+        reference M_emplace_back_slow(Args&&... args) {
+            typename Base::Guard_map map(*this);
+
+            const bool cross_block = M_finish._cur == M_finish._last - 1;
+            if (cross_block) map.reserve(false);
+
+            Guard_nodes nodes(*this);
+            nodes.allocate(0, cross_block ? 1 : 0);
+
+            Allocator_traits::construct(get_T_allocator(), M_finish.operator->(), mystl::forward<Args>(args)...);
+            ++M_finish;
+            nodes.release();
+            map.release();
+            return back();
+        }
+
+        template <typename... Args>
+        reference M_emplace_front_slow(Args&&... args) {
+            typename Base::Guard_map map(*this);
+
+            const bool cross_block = M_start._cur == M_start._first;
+            if (cross_block) map.reserve(true);
+
+            Guard_nodes nodes(*this);
+            nodes.allocate(cross_block ? 1 : 0, 0);
+
+            Allocator_traits::construct(get_T_allocator(), (M_start - 1).operator->(), mystl::forward<Args>(args)...);
+            --M_start;
+            nodes.release();
+            map.release();
+            return front();
+        }
+
     public:
         // *************************************************************************************
         // modifiers of deque
@@ -899,18 +972,12 @@ namespace mystl {
             if (size() >= max_size()) {
                 throw mystl::length_error("deque cannot be larger than max_size()");
             }
-            if (!M_map) Base::M_initialize_map(0);
-            
-            const bool cross_block = M_finish._cur == M_finish._last - 1;
-            if (cross_block) Base::M_reserve_map_at_back();
-
-            Guard_nodes nodes(*this);
-            nodes.allocate(0, cross_block ? 1 : 0);
-
-            Allocator_traits::construct(get_T_allocator(), M_finish.operator->(), mystl::forward<Args>(args)...);
-            ++M_finish;
-            nodes.release();
-            return back();
+            if (M_map && M_finish._cur != M_finish._last - 1) {
+                Allocator_traits::construct(get_T_allocator(), M_finish._cur, mystl::forward<Args>(args)...);
+                ++M_finish._cur;
+                return *(M_finish._cur - 1);
+            }
+            return M_emplace_back_slow(mystl::forward<Args>(args)...);
         }
 
         // push_back
@@ -928,18 +995,12 @@ namespace mystl {
             if (size() >= max_size()) {
                 throw mystl::length_error("deque cannot be larger than max_size()");
             }
-            if (!M_map) Base::M_initialize_map(0);
-            
-            const bool cross_block = M_start._cur == M_start._first;
-            if (cross_block) Base::M_reserve_map_at_front();
-
-            Guard_nodes nodes(*this);
-            nodes.allocate(cross_block ? 1 : 0, 0);
-
-            Allocator_traits::construct(get_T_allocator(), (M_start - 1).operator->(), mystl::forward<Args>(args)...);
-            --M_start;
-            nodes.release();
-            return front();
+            if (M_map && M_start._cur != M_start._first) {
+                Allocator_traits::construct(get_T_allocator(), M_start._cur - 1, mystl::forward<Args>(args)...);
+                --M_start._cur;
+                return *M_start;
+            }
+            return M_emplace_front_slow(mystl::forward<Args>(args)...);
         }
 
         // push_front
@@ -1301,7 +1362,6 @@ namespace mystl {
             }
             if (!M_map) {
                 assert(pos == M_start);
-                Base::M_initialize_map(0);
                 emplace_back(mystl::forward<Args>(args)...);
                 return M_start;
             }
@@ -1425,7 +1485,9 @@ namespace mystl {
             const size_type n = pos - M_start;
             iterator erase_pos = M_start + n;
 
-            if (n <= size() / 2) {
+            const size_type before = n;
+            const size_type after = size() - n - 1;
+            if (before < after) {
                 const size_type old_slot = M_start._node - M_map;
                 const bool cross_block = M_start._cur == M_start._last - 1;
                 if (pos != M_start) {

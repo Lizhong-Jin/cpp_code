@@ -88,9 +88,9 @@ namespace mystl {
             friend class rb_tree;
             template<bool> friend class tree_iterator;
             
-            using node_type = rb_node<Value>;
+            using internal_node_type = rb_node<Value>;
             using base_pointer = mystl::conditional_t<IsConst, const rb_node_base*, rb_node_base*>;
-            using value_node_pointer = mystl::conditional_t<IsConst, const node_type*, node_type*>;
+            using value_node_pointer = mystl::conditional_t<IsConst, const internal_node_type*, internal_node_type*>;
 
             base_pointer node_ = nullptr;
 
@@ -188,9 +188,9 @@ namespace mystl {
         };
 
     public:
-        using node_type = rb_node<Value>;
-        template <typename Iterator, typename Node_Type>
-        using insert_return_type = _insert_return<Iterator, Node_Type>;
+        using internal_node_type = rb_node<Value>;
+        using node_type = rb_node_handle<Value, Allocator>;
+        insert_return_type = _insert_return<iterator, node_type>();
 
         using allocator_type = Allocator;
         using Value_alloc_type = typename allocator_traits<Allocator>::template rebind_alloc<Value>;
@@ -213,7 +213,7 @@ namespace mystl {
     
     private:
         using alloc_traits = mystl::allocator_traits<allocator_type>;
-        using node_allocator = typename alloc_traits::template rebind_alloc<node_type>;
+        using node_allocator = typename alloc_traits::template rebind_alloc<internal_node_type>;
         using node_alloc_traits = mystl::allocator_traits<node_allocator>;
         using node_pointer = typename node_alloc_traits::pointer;
         using const_node_pointer = typename node_alloc_traits::const_pointer;
@@ -384,11 +384,11 @@ namespace mystl {
             rb_node_base* prev = &header_;
             bool insert_left;
             while (node != nullptr) {
-                if (comp_(key_of_value_(p->value), key_of_value_(static_cast<node_type*>(node)->value))) {
+                if (comp_(key_of_value_(p->value), key_of_value_(static_cast<internal_node_type*>(node)->value))) {
                     prev = node;
                     node = node->left;
                     insert_left = true;
-                }else if (comp_(key_of_value_(static_cast<node_type*>(node)->value), key_of_value_(p->value))) {
+                }else if (comp_(key_of_value_(static_cast<internal_node_type*>(node)->value), key_of_value_(p->value))) {
                     prev = node;
                     node = node->right;
                     insert_left = false;
@@ -457,7 +457,7 @@ namespace mystl {
             return iterator(p);
         }
 
-        constexpr iterator insert_at_pos(const_iterator pos, node_type* node) {
+        constexpr iterator insert_at_pos(const_iterator pos, internal_node_type* node) {
             if (size_ >= max_size())
                 throw mystl::length_error("rb_tree cannot be larger than max_size()");
 
@@ -490,18 +490,18 @@ namespace mystl {
             return iterator(node);
         }
 
-        constexpr iterator insert_node_unique(node_type* node) {
+        constexpr iterator insert_node_unique(internal_node_type* node) {
             node->color = Color::RED;
 
             rb_node_base* cur = header_.parent;
             rb_node_base* prev = &header_;
             bool insert_left;
             while (cur != nullptr) {
-                if (comp_(key_of_value_(node->value), key_of_value_(static_cast<node_type*>(cur)->value))) {
+                if (comp_(key_of_value_(node->value), key_of_value_(static_cast<internal_node_type*>(cur)->value))) {
                     prev = cur;
                     cur = cur->left;
                     insert_left = true;
-                }else if (comp_(key_of_value_(static_cast<node_type*>(cur)->value), key_of_value_(node->value))) {
+                }else if (comp_(key_of_value_(static_cast<internal_node_type*>(cur)->value), key_of_value_(node->value))) {
                     prev = cur;
                     cur = cur->right;
                     insert_left = false;
@@ -593,6 +593,10 @@ namespace mystl {
             return emplace_unique(mystl::move(value)).first;
         }
 
+        constexpr insert_return_type insert_unique(internal_node_type&& nh) {
+            
+        }
+
         // emplace_hint
         template <typename... Args>
         constexpr iterator emplace_hint(const_iterator hint, Args&&... args) {
@@ -676,7 +680,7 @@ namespace mystl {
         constexpr iterator find(const Key& key) {
             rb_node_base* node = header_.parent;
             while (node != nullptr) {
-                auto& value = static_cast<node_type*>(node)->value;
+                auto& value = static_cast<internal_node_type*>(node)->value;
                 if (comp_(key, key_of_value_(value))) {
                     node = node->left;
                 }else if (comp_(key_of_value_(value), key)) {
@@ -691,7 +695,7 @@ namespace mystl {
         constexpr const_iterator find(const Key& key) const {
             const rb_node_base* node = header_.parent;
             while (node) {
-                const auto& value = static_cast<const node_type*>(node)->value;
+                const auto& value = static_cast<const internal_node_type*>(node)->value;
                 if (comp_(key, key_of_value_(value))) {
                     node = node->left;
                 } else if (comp_(key_of_value_(value), key)) {
@@ -718,7 +722,7 @@ namespace mystl {
             rb_node_base* node = header_.parent;
             rb_node_base* candidate = &header_;
             while (node) {
-                const auto& value = static_cast<const node_type*>(node)->value;
+                const auto& value = static_cast<const internal_node_type*>(node)->value;
                 if (!comp_(key_of_value_(value), key)) {
                     candidate = node;
                     node = node->left;
@@ -733,7 +737,7 @@ namespace mystl {
             const rb_node_base* node = header_.parent;
             const rb_node_base* candidate = &header_;
             while (node) {
-                const auto& value = static_cast<const node_type*>(node)->value;
+                const auto& value = static_cast<const internal_node_type*>(node)->value;
                 if (!comp_(key_of_value_(value), key)) {
                     candidate = node;
                     node = node->left;
@@ -748,7 +752,7 @@ namespace mystl {
             rb_node_base* node = header_.parent;
             rb_node_base* candidate = &header_;
             while (node) {
-                const auto& value = static_cast<const node_type*>(node)->value;
+                const auto& value = static_cast<const internal_node_type*>(node)->value;
                 if (comp_(key, key_of_value_(value))) {
                     candidate = node;
                     node = node->left;
@@ -763,7 +767,7 @@ namespace mystl {
             const rb_node_base* node = header_.parent;
             const rb_node_base* candidate = &header_;
             while (node) {
-                const auto& value = static_cast<const node_type*>(node)->value;
+                const auto& value = static_cast<const internal_node_type*>(node)->value;
                 if (comp_(key, key_of_value_(value))) {
                     candidate = node;
                     node = node->left;
@@ -810,9 +814,9 @@ namespace mystl {
         }
 
         template<class... Args>
-        constexpr node_type* create_node(Args&&... args) {
+        constexpr internal_node_type* create_node(Args&&... args) {
             // 当前实现先支持普通指针 allocator
-            static_assert(mystl::is_same_v<node_pointer, node_type*>);
+            static_assert(mystl::is_same_v<node_pointer, internal_node_type*>);
 
             auto* p = node_alloc_traits::allocate(node_alloc_, 1);
             try {
@@ -826,9 +830,9 @@ namespace mystl {
 
         struct Guard_subtree {
             rb_tree& owner;
-            node_type* root;
+            internal_node_type* root;
 
-            Guard_subtree(rb_tree& tree, node_type* p) noexcept
+            Guard_subtree(rb_tree& tree, internal_node_type* p) noexcept
                 : owner(tree), root(p) {}
 
             Guard_subtree(const Guard_subtree&) = delete;
@@ -840,7 +844,7 @@ namespace mystl {
                 owner.delete_all(root);
             }
 
-            [[nodiscard]] node_type* release() noexcept {
+            [[nodiscard]] internal_node_type* release() noexcept {
                 auto* p = root;
                 root = nullptr;
                 return p;
@@ -907,9 +911,9 @@ namespace mystl {
             size_ = other.size_;
         }
 
-        constexpr node_type* clone_subtree(const rb_node_base* src, rb_node_base* parent) {
+        constexpr internal_node_type* clone_subtree(const rb_node_base* src, rb_node_base* parent) {
             if (src == nullptr) return nullptr;
-            const auto* source = static_cast<const node_type*>(src);
+            const auto* source = static_cast<const internal_node_type*>(src);
 
             Guard_subtree guard(*this, create_node(source->value));
             auto* p = guard.root;
@@ -922,10 +926,10 @@ namespace mystl {
             return guard.release();
         }
 
-        constexpr node_type* clone_moving_subtree(rb_node_base* src, rb_node_base* parent){
+        constexpr internal_node_type* clone_moving_subtree(rb_node_base* src, rb_node_base* parent){
             if (!src) return nullptr;
 
-            auto* source = static_cast<node_type*>(src);
+            auto* source = static_cast<internal_node_type*>(src);
 
             Guard_subtree guard(*this, create_node(mystl::move(source->value)));
 
@@ -942,7 +946,7 @@ namespace mystl {
         // erase one node in rb_tree
         constexpr void erase_node(rb_node_base* node) {
             if (size_ == 1) {
-                auto* actual = static_cast<node_type*>(node);
+                auto* actual = static_cast<internal_node_type*>(node);
                 node_alloc_traits::destroy(node_alloc_, actual);
                 node_alloc_traits::deallocate(node_alloc_, actual, 1); 
                 reset_empty();
@@ -1065,7 +1069,7 @@ namespace mystl {
             }else if (new_tail) {
                 header_.right = new_tail;
             }
-            auto* actual = static_cast<node_type*>(node);
+            auto* actual = static_cast<internal_node_type*>(node);
             node_alloc_traits::destroy(node_alloc_, actual);
             node_alloc_traits::deallocate(node_alloc_, actual, 1);
         }
@@ -1221,7 +1225,7 @@ namespace mystl {
             delete_all(node->left);
             delete_all(node->right);
 
-            auto* actual = static_cast<node_type*>(node);
+            auto* actual = static_cast<internal_node_type*>(node);
             node_alloc_traits::destroy(node_alloc_, actual);
             node_alloc_traits::deallocate(node_alloc_, actual, 1);
         }
