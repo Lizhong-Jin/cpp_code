@@ -292,19 +292,10 @@ namespace mystl {
             }
         }; // class tree_iterator
         // *************************************************************************************
-    
-    private:
-        template <typename Iterator, typename Node_Type>
-        struct _insert_return {
-            Iterator position;
-            bool inserted;
-            Node_Type node;
-        };
 
     public:
         using internal_node_type = rb_node<Value>;
         using node_type = rb_node_handle<Value, Allocator>;
-        insert_return_type = _insert_return<iterator, node_type>();
 
         using allocator_type = Allocator;
         using Value_alloc_type = typename allocator_traits<Allocator>::template rebind_alloc<Value>;
@@ -324,6 +315,12 @@ namespace mystl {
         using const_iterator = tree_iterator<true>;
         using reverse_iterator = mystl::reverse_iterator<iterator>;
         using const_reverse_iterator = mystl::reverse_iterator<const_iterator>;
+
+        struct insert_return_type {
+            iterator position;
+            bool inserted;
+            node_type node;
+        };
     
     private:
         using alloc_traits = mystl::allocator_traits<allocator_type>;
@@ -605,8 +602,17 @@ namespace mystl {
         }
 
         constexpr iterator insert_node_unique(internal_node_type* node) {
-            node->color = Color::RED;
+            if (size_ == 0) {
+                node->color = Color::BLACK;
+                node->parent = &header_;
+                header_.parent = node;
+                header_.left = node;
+                header_.right = node;
+                size_ = 1;
+                return iterator(node);
+            }
 
+            node->color = Color::RED;
             rb_node_base* cur = header_.parent;
             rb_node_base* prev = &header_;
             bool insert_left;
@@ -707,8 +713,45 @@ namespace mystl {
             return emplace_unique(mystl::move(value)).first;
         }
 
-        constexpr insert_return_type insert_unique(internal_node_type&& nh) {
-            
+        constexpr insert_return_type insert_unique(node_type&& nh) {
+            if (nh.empty()) {
+                return {end(), false, node_type{}};
+            }
+            assert(get_allocator() == nh.get_allocator());
+            auto* node = nh.get();
+            iterator insert_pos = insert_node_unique(node);
+            if (insert_pos.node_ == node) {
+                (void)nh.release();
+                return {insert_pos, true, node_type{}};
+            }
+            return {insert_pos, false, mystl::move(nh)};
+        }
+
+        constexpr iterator insert_unique(const_iterator pos, node_type&& nh) {
+            if (nh.empty()) return end();
+            assert(get_allocator() == nh.get_allocator());
+            if (size_ == 0) {
+                iterator insert_pos = insert_node_unique(node);
+                (void)nh.release();
+                return insert_pos;
+            }
+            auto* node = nh.get();
+            if (pos == cbegin()) {
+                if (comp_(key_of_value_(node->value), key_of_value_(*pos))) {
+                    return insert_node_unique(node);
+                }
+            }else {
+                const_iterator prev = pos;
+                --prev;
+                if (comp_(key_of_value_(*prev), key_of_value_(node->value)) && 
+                    (pos == cend() ? true : comp_(key_of_value_(node->value), key_of_value_(*pos)))) {
+                    return insert_node_unique(node);
+                }
+            }
+            iterator insert_pos = insert_node_unique(node);
+            if (insert_pos.node_ == node)
+                (void)nh.release();
+            return insert_pos;
         }
 
         // emplace_hint
@@ -767,7 +810,25 @@ namespace mystl {
             return 1;
         }
 
-        // Policy swaps must not throw: the policies must stay paired with their nodes.
+        // extract
+        constexpr node_type extract(const_iterator pos) {
+            assert (size_ != 0 && pos != cend());
+            auto* node = const_cast<rb_node_base*>(pos.node_);
+            unlink_node(node);
+            node->parent = nullptr;
+            node->left = nullptr;
+            node->right = nullptr;
+            return node_type(static_cast<internal_node_type*>(node), get_allocator());
+        }
+
+        constexpr node_type extract(const Key& key) {
+            auto pos = find(key);
+            if (pos == end())
+                return node_type();
+            return extract(pos);
+        }
+
+        // swap
         constexpr void swap(rb_tree& other) 
             noexcept(alloc_traits::is_always_equal::value &&
                     mystl::is_nothrow_swappable_v<Compare> &&
@@ -1059,10 +1120,15 @@ namespace mystl {
 
         // erase one node in rb_tree
         constexpr void erase_node(rb_node_base* node) {
+            unlink_node(node);
+            auto* actual = static_cast<internal_node_type*>(node);
+            node_alloc_traits::destroy(node_alloc_, actual);
+            node_alloc_traits::deallocate(node_alloc_, actual, 1);
+        }
+
+        // unlink_node
+        constexpr void unlink_node(rb_node_base* node) {
             if (size_ == 1) {
-                auto* actual = static_cast<internal_node_type*>(node);
-                node_alloc_traits::destroy(node_alloc_, actual);
-                node_alloc_traits::deallocate(node_alloc_, actual, 1); 
                 reset_empty();
                 return;
             }
@@ -1183,10 +1249,9 @@ namespace mystl {
             }else if (new_tail) {
                 header_.right = new_tail;
             }
-            auto* actual = static_cast<internal_node_type*>(node);
-            node_alloc_traits::destroy(node_alloc_, actual);
-            node_alloc_traits::deallocate(node_alloc_, actual, 1);
+            return;
         }
+
 
         static constexpr rb_node_base* minimum(rb_node_base* p) noexcept {
             while (p->left)
