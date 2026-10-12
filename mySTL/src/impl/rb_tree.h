@@ -519,6 +519,35 @@ namespace mystl {
             return emplace_unique(mystl::move(value)).first;
         }
 
+        template <typename... Args>
+        constexpr iterator emplace_hint(const_iterator hint, Args&&... args) {
+            Guard_subtree guard(*this, create_node(mystl::forward<Args>(args)...));
+            
+            if (size_ == 0) {
+                auto* p = guard.release();
+                p->color = Color::BLACK;
+                p->parent = &header_;
+                header_.parent = p;
+                header_.left = p;
+                header_.right = p;
+                size_ = 1;
+                return iterator(p);
+            }
+            auto* p = guard.root;
+            if (pos == cbegin()) {
+                if (comp_(key_of_value_(p->value), key_of_value_(*hint)))
+                    return insert_at_pos(pos, mystl::move(guard.release()->value));
+            }else {
+                const_iterator prev = pos;
+                --prev;
+                if (comp_(key_of_value_(*prev), key_of_value_(p->value)) && 
+                    (pos == cend() ? true : comp_(key_of_value_(p->value), key_of_value_(*hint)))) {
+                    return insert_at_pos(pos, mystl::move(guard.release()->value));
+                }
+            }
+            return emplace_unique(mystl::move(guard.release()->value)).first;
+        }
+
         // erase
         constexpr iterator erase(const_iterator pos) {
             assert (size_ != 0 && pos != cend());
@@ -529,19 +558,172 @@ namespace mystl {
             return post;
         }
 
+        constexpr size_type erase(const Key& key) {
+            auto pos = find(key);
+            if (pos == end())
+                return 0;
+            erase(pos);
+            return 1;
+        }
 
+        // swap
+        constexpr void swap(rb_tree& other) 
+            noexcept(noexcept(swap(comp_, other.comp_)))
+        {
+            if (this == &other) return;
+            if constexpr (alloc_traits::propagate_on_container_swap::value) {
+                using mystl::swap;
+                swap(node_alloc_, other.node_alloc_);
+            }else {
+                assert(node_alloc_ == other.node_alloc_);
+            }
+            swap_tree(other);
+            swap(comp_, other.comp_);
+            swap(key_of_value_, other.key_of_value_);
+        }
+
+        // *************************************************************************************
+        // lookup
+
+        // find
+        constexpr iterator find(const Key& key) {
+            rb_node_base* node = header_.parent;
+            while (node != nullptr) {
+                auto& value = static_cast<node_type*>(node)->value;
+                if (comp_(key, key_of_value_(value))) {
+                    node = node->left;
+                }else if (comp_(key_of_value_(value), key)) {
+                    node = node->right;
+                }else {
+                    return iterator(node);
+                }
+            }
+            return end();
+        }
+        
+        constexpr const_iterator find(const Key& key) const {
+            const rb_node_base* node = header_.parent;
+            while (node) {
+                const auto& value = static_cast<const node_type*>(node)->value;
+                if (comp_(key, key_of_value_(value))) {
+                    node = node->left;
+                } else if (comp_(key_of_value_(value), key)) {
+                    node = node->right;
+                } else {
+                    return const_iterator(node);
+                }
+            }
+            return cend();
+        }
+
+        // count
+        constexpr size_type count(const Key& key) const {
+            return find(key) == cend() ? 0 : 1;
+        }
+
+        // contains
+        constexpr bool contains(const Key& key) const {
+            return find(key) != cend();
+        }
+
+        // lower_bound & upper_bound
+        constexpr iterator lower_bound(const Key& key) {
+            rb_node_base* node = header_.parent;
+            rb_node_base* candidate = &header_;
+            while (node) {
+                const auto& value = static_cast<const node_type*>(node)->value;
+                if (!comp_(key_of_value_(value), key)) {
+                    candidate = node;
+                    node = node->left;
+                }else {
+                    node = node->right;
+                }
+            }
+            return iterator(candidate);
+        }
+
+        constexpr const_iterator lower_bound(const Key& key) const {
+            const rb_node_base* node = header_.parent;
+            const rb_node_base* candidate = &header_;
+            while (node) {
+                const auto& value = static_cast<const node_type*>(node)->value;
+                if (!comp_(key_of_value_(value), key)) {
+                    candidate = node;
+                    node = node->left;
+                }else {
+                    node = node->right;
+                }
+            }
+            return const_iterator(candidate);
+        }
+
+        constexpr iterator upper_bound(const Key& key) {
+            rb_node_base* node = header_.parent;
+            rb_node_base* candidate = &header_;
+            while (node) {
+                const auto& value = static_cast<const node_type*>(node)->value;
+                if (comp_(key, key_of_value_(value))) {
+                    candidate = node;
+                    node = node->left;
+                }else {
+                    node = node->right;
+                }
+            }
+            return iterator(candidate);
+        }
+
+        constexpr const_iterator upper_bound(const Key& key) const {
+            const rb_node_base* node = header_.parent;
+            const rb_node_base* candidate = &header_;
+            while (node) {
+                const auto& value = static_cast<const node_type*>(node)->value;
+                if (comp_(key, key_of_value_(value))) {
+                    candidate = node;
+                    node = node->left;
+                }else {
+                    node = node->right;
+                }
+            }
+            return const_iterator(candidate);
+        }
+
+        // equal_range
+        constexpr mystl::pair<iterator, iterator> equal_range(const Key& key) {
+            iterator lhs = lower_bound(key);
+            if (lhs == end() || comp_(key, key_of_value_(static_cast<const node_type*>(lhs)->value))) {
+                return mystl::make_pair(lhs, lhs);
+            }
+            iterator rhs = lhs;
+            ++rhs;
+            return mystl::make_pair(lhs, rhs); 
+        }
+
+        constexpr mystl::pair<const_iterator, const_iterator> equal_range(const Key& key) const {
+            const_iterator lhs = lower_bound(key);
+            if (lhs == end() || comp_(key, key_of_value_(static_cast<const node_type*>(lhs)->value))) {
+                return mystl::make_pair(lhs, lhs);
+            }
+            const_iterator rhs = lhs;
+            ++rhs;
+            return mystl::make_pair(lhs, rhs); 
+        }
+
+        // observers
+        constexpr key_compare key_comp() {
+            return comp_;
+        }
         
 
 
     private:
-        static bool is_header(const rb_node_base* p) noexcept {
+        static constexpr bool is_header(const rb_node_base* p) noexcept {
             return p &&
                 p->color == Color::RED &&
                 (!p->parent || p->parent->parent == p);
         }
 
         template<class... Args>
-        node_type* create_node(Args&&... args) {
+        constexpr node_type* create_node(Args&&... args) {
             // 当前实现先支持普通指针 allocator
             static_assert(mystl::is_same_v<node_pointer, node_type*>);
 
@@ -598,6 +780,27 @@ namespace mystl {
             header_.parent->parent = &header_;
 
             other.reset_empty();
+        }
+
+        constexpr void swap_tree(rb_tree& other) noexcept {
+            using mystl::swap;
+            rb_node_base* this_root = header_.parent;
+            rb_node_base* other_root = other.header_.parent;
+            if (this_root) {
+                this_root->parent = &other.header_;
+            }
+            if (other_root) {
+                other_root->parent = &header_;
+            }
+            swap(header_.parent, other.header_.parent);
+            swap(header_.left, other.header_.left);
+            swap(header_.right, other.header_.right);
+            swap(size_, other.size_);
+            
+            if (!header_.parent)
+                reset_empty();
+            if (!other.header_.parent)
+                other.reset_empty();
         }
 
         constexpr void copy_tree(const rb_tree& other) {
@@ -661,18 +864,17 @@ namespace mystl {
             rb_node_base* new_begin = nullptr;
             rb_node_base* new_tail = nullptr;
             if (header_.left == node) {
-                new_begin = node;
-                ++new_begin;
+                iterator next(node);
+                new_begin = (++next).node_;
             }
             if (header_.right == node) {
-                new_tail = node;
-                --new_tail;
+                iterator prev(node);
+                new_tail = (--prev).node_;
             }
-            // if both of the two child of node are not nullptr
-            // swap pointer with its succeed node
+            // Move a node with two children to its successor's position.
             if (node->left && node->right) {
                 rb_node_base* succeed_node = minimum(node->right);
-                swap_node(node, succeed_node);
+                swap_with_successor(node, succeed_node);
                 mystl::swap(node->color, succeed_node->color);
             }
             // if the node to be deleted has only one non-null child,
@@ -793,7 +995,7 @@ namespace mystl {
             return p;
         }
 
-        void transplant(rb_node_base* old_node, rb_node_base* replacement) noexcept {
+        constexpr void transplant(rb_node_base* old_node, rb_node_base* replacement) noexcept {
             auto* parent = old_node->parent;
 
             if (parent == &header_)
@@ -807,15 +1009,35 @@ namespace mystl {
                 replacement->parent = parent;
         }
 
-        // swap pointer and position of two node
-        constexpr void swap_node(rb_node_base* lhs, rb_node_base* rhs) noexcept {
-            rb_node_base tmp;
-            tmp.copy_ptr(lhs);
-            transplant(lhs, &tmp);
-            lhs->copy_ptr(rhs);
-            transplant(rhs, lhs);
-            rhs->copy_ptr(&tmp);
-            transplant(&tmp, rhs);
+        // Only for erase: node has two children, successor == minimum(node->right).
+        constexpr void swap_with_successor(rb_node_base* node, rb_node_base* successor) noexcept {
+            assert(node && node->left && node->right);
+            assert(successor == minimum(node->right));
+
+            auto* node_left = node->left;
+            auto* node_right = node->right;
+            auto* successor_parent = successor->parent;
+            auto* successor_right = successor->right;
+
+            transplant(node, successor);
+            if (successor_parent == node) {
+                // The successor is the direct right child: node becomes its right child.
+                successor->right = node;
+                node->parent = successor;
+            } else {
+                // A deeper successor is always its parent's left child.
+                successor_parent->left = node;
+                node->parent = successor_parent;
+                successor->right = node_right;
+                node_right->parent = successor;
+            }
+
+            successor->left = node_left;
+            node_left->parent = successor;
+            node->left = nullptr;
+            node->right = successor_right;
+            if (successor_right)
+                successor_right->parent = node;
         }
 
         // *************************************************************************************
