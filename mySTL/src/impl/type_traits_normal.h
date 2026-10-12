@@ -553,6 +553,29 @@ namespace mystl {
     template <typename T>
     inline constexpr bool is_nothrow_move_assignable_v = is_nothrow_move_assignable<T>::value;
 
+    // is_assignable
+    template <typename T, typename U, typename = void>
+    struct is_assignable : false_type {};
+    template <typename T, typename U>
+    struct is_assignable<T, U, void_t<decltype(declval<T>() = declval<U>())>> : true_type {};
+    template <typename T, typename U>
+    inline constexpr bool is_assignable_v = is_assignable<T, U>::value;
+
+    // is_nothrow_assignable
+    template <typename T, typename U>
+    struct is_nothrow_assignable {
+    private:
+        template <typename T_, typename U_>
+        static auto test(int) -> decltype(declval<T_>() = declval<U_>(),
+                                bool_constant<noexcept(declval<T_>() = declval<U_>())>{});
+        template <typename T_, typename U_>
+        static false_type test(...);
+    public:
+        static constexpr bool value = decltype(test<T, U>(0))::value;
+    };
+    template <typename T, typename U>
+    inline constexpr bool is_nothrow_assignable_v = is_nothrow_assignable<T, U>::value;
+
     // is_destructible
     template <typename T, typename = void>
     struct is_destructible_impl : false_type {};
