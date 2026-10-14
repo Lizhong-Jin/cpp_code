@@ -505,13 +505,11 @@ namespace mystl {
         // operator ==
         constexpr rb_tree& operator=(const rb_tree& other) {
             if (this == &other) return *this;
+            clear();
+            comp_ = other.comp_;
+            key_of_value_ = other.key_of_value_;
             if constexpr (alloc_traits::propagate_on_container_copy_assignment::value) {
-                if (node_alloc_ != other.node_alloc_) {
-                    clear();
-                }
-                comp_ = other.comp_;
                 node_alloc_ = other.node_alloc_;
-                key_of_value_ = other.key_of_value_;
             }
             copy_tree(other);
             return *this;
@@ -1207,9 +1205,9 @@ namespace mystl {
         }
 
         constexpr void move_assign(rb_tree&& other, false_type) {
+            clear();
             comp_ = other.comp_;
             key_of_value_ = other.key_of_value_;
-            clear();
             if (node_alloc_ == other.node_alloc_) {
                 swap_tree(other);
             }else {

@@ -21,8 +21,9 @@ namespace mystl {
 
         using Base = rb_tree<Key, Key, KeyOfValue, Compare, Allocator>;
 
+    public:
         using allocator_type = Allocator;
-        using Value_alloc_type = typename allocator_traits<Allocator>::template rebind_alloc<Value>;
+        using Value_alloc_type = typename allocator_traits<Allocator>::template rebind_alloc<Key>;
         using Traits = allocator_traits<Value_alloc_type>;
         using pointer = typename Traits::pointer;
         using const_pointer = typename Traits::const_pointer;
@@ -34,7 +35,7 @@ namespace mystl {
         using key_compare = Compare;
         using value_compare = Compare;
         using reference = Value&;
-        using const_reference = const Value&;
+        using const_reference = const Key&;
         using iterator = Base::const_iterator;
         using const_iterator = Base::const_iterator;
         using reverse_iterator = Base::const_reverse_iterator;
