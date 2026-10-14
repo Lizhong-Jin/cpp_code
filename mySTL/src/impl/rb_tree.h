@@ -439,7 +439,7 @@ namespace mystl {
 
         constexpr rb_tree(mystl::initializer_list<value_type> list, const Allocator& alloc) 
             : rb_tree(list, Compare{}, alloc, KeyOfValue{}) {}
-            
+
 
         // *************************************************************************************
         // destruct
@@ -509,15 +509,20 @@ namespace mystl {
                 if (node_alloc_ != other.node_alloc_) {
                     clear();
                 }
+                comp_ = other.comp_;
                 node_alloc_ = other.node_alloc_;
+                key_of_value_ = other.key_of_value_;
             }
             copy_tree(other);
             return *this;
         }
 
-        constexpr rb_tree& opeartor=(rb_tree&& other)
-            noexcept(alloc_traits::propagate_on_container_move_assignment::value ||
-                    alloc_traits::is_always_equal::value)
+        constexpr rb_tree& operator=(rb_tree&& other)
+            noexcept((alloc_traits::propagate_on_container_move_assignment::value ||
+                    alloc_traits::is_always_equal::value) && 
+                    mystl::is_nothrow_copy_assignable_v<Compare> && 
+                    mystl::is_nothrow_copy_assignable_v<KeyOfValue> && 
+                    mystl::is_nothrow_move_assignable_v<node_allocator>)
         {
             if (this != &other) {
                 move_assign(mystl::move(other), typename alloc_traits::propagate_on_container_move_assignment{});
@@ -525,7 +530,7 @@ namespace mystl {
             return *this;
         }
 
-        constexpr rb_tree& opeartor=(mystl::initializer_list<value_type> list) {
+        constexpr rb_tree& operator=(mystl::initializer_list<value_type> list) {
             clear();
             for (auto iter = list.begin(); iter != list.end(); ++iter) {
                 insert_unique(*iter);
@@ -1195,15 +1200,23 @@ namespace mystl {
         // move_assign
         constexpr void move_assign(rb_tree&& other, true_type) {
             clear();
+            comp_ = other.comp_;
             node_alloc_ = mystl::move(other.node_alloc_);
+            key_of_value_ = other.key_of_value_;
             swap_tree(other);
         }
 
         constexpr void move_assign(rb_tree&& other, false_type) {
+            comp_ = other.comp_;
+            key_of_value_ = other.key_of_value_;
+            clear();
             if (node_alloc_ == other.node_alloc_) {
-                clear();
                 swap_tree(other);
             }else {
+                if (other.empty()) 
+                    return;
+                if (other.size() > max_size())
+                    throw mystl::length_error("rb_tree cannot be larger than max_size()");
                 try {
                     Guard_subtree guard(*this, clone_moving_subtree(other.header_.parent, &header_));
                     auto* left = minimum(guard.root);
