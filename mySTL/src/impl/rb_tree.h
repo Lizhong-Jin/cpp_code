@@ -404,6 +404,43 @@ namespace mystl {
             other.clear();
         }
 
+        template <typename Input_Iterator>
+        constexpr rb_tree(Input_Iterator first, Input_Iterator last, const Compare& comp,
+                        const Allocator& alloc, const KeyOfValue& key_of_value)
+            : rb_tree(comp, alloc, key_of_value)
+        {
+            for (; first != last; ++first) {
+                insert_unique(*first);
+            }
+        }
+
+        template <typename Input_Iterator>
+        constexpr rb_tree(Input_Iterator first, Input_Iterator last, const Compare& comp = Compare{},
+                        const Allocator& alloc = Allocator())
+            : rb_tree(first, last, comp, alloc, KeyOfValue{}) {}
+
+        template <typename Input_Iterator>
+        constexpr rb_tree(Input_Iterator first, Input_Iterator last, const Allocator& alloc)
+            : rb_tree(first, last, Compare{}, alloc, KeyOfValue{}) {}
+
+
+        constexpr rb_tree(mystl::initializer_list<value_type> list, const Compare& comp,
+                        const Allocator& alloc, const KeyOfValue& key_of_value) 
+            : rb_tree(comp, alloc, key_of_value)
+        {
+            for (auto iter = list.begin(); iter != list.end(); ++iter) {
+                insert_unique(*iter);
+            }
+        }
+
+        constexpr rb_tree(mystl::initializer_list<value_type> list, const Compare& comp = Compare{},
+                        const Allocator& alloc = Allocator{}) 
+            : rb_tree(list, comp, alloc, KeyOfValue{}) {}
+
+        constexpr rb_tree(mystl::initializer_list<value_type> list, const Allocator& alloc) 
+            : rb_tree(list, Compare{}, alloc, KeyOfValue{}) {}
+            
+
         // *************************************************************************************
         // destruct
         constexpr ~rb_tree() noexcept {
@@ -484,6 +521,14 @@ namespace mystl {
         {
             if (this != &other) {
                 move_assign(mystl::move(other), typename alloc_traits::propagate_on_container_move_assignment{});
+            }
+            return *this;
+        }
+
+        constexpr rb_tree& opeartor=(mystl::initializer_list<value_type> list) {
+            clear();
+            for (auto iter = list.begin(); iter != list.end(); ++iter) {
+                insert_unique(*iter);
             }
             return *this;
         }
@@ -763,7 +808,7 @@ namespace mystl {
             }
             if (pos == cbegin()) {
                 if (comp_(key_of_value_(node->value), key_of_value_(*pos))) {
-                    iterator insert_pos = insert_node_unique(node);
+                    iterator insert_pos = insert_at_pos(pos, node);
                     (void)nh.release();
                     return insert_pos;
                 }
@@ -772,7 +817,7 @@ namespace mystl {
                 --prev;
                 if (comp_(key_of_value_(*prev), key_of_value_(node->value)) && 
                     (pos == cend() ? true : comp_(key_of_value_(node->value), key_of_value_(*pos)))) {
-                    iterator insert_pos = insert_node_unique(node);
+                    iterator insert_pos = insert_at_pos(pos, node);
                     (void)nh.release();
                     return insert_pos;
                 }
