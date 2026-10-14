@@ -909,7 +909,7 @@ namespace mystl {
         template <typename... Args>
         reference M_emplace_back_slow(Args&&... args) {
             typename Base::Guard_map map(*this);
-
+            
             const bool cross_block = M_finish._cur == M_finish._last - 1;
             if (cross_block) map.reserve(false);
 
@@ -926,7 +926,7 @@ namespace mystl {
         template <typename... Args>
         reference M_emplace_front_slow(Args&&... args) {
             typename Base::Guard_map map(*this);
-
+            
             const bool cross_block = M_start._cur == M_start._first;
             if (cross_block) map.reserve(true);
 

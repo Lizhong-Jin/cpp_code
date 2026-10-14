@@ -465,6 +465,31 @@ namespace mystl {
         }
 
         // *************************************************************************************
+        // operator ==
+        constexpr rb_tree& operator=(const rb_tree& other) {
+            if (this == &other) return *this;
+            if constexpr (alloc_traits::propagate_on_container_copy_assignment::value) {
+                if (node_alloc_ != other.node_alloc_) {
+                    clear();
+                }
+                node_alloc_ = other.node_alloc_;
+            }
+            copy_tree(other);
+            return *this;
+        }
+
+        constexpr rb_tree& opeartor=(rb_tree&& other)
+            noexcept(alloc_traits::propagate_on_container_move_assignment::value ||
+                    alloc_traits::is_always_equal::value)
+        {
+            if (this != &other) {
+                move_assign(mystl::move(other), typename alloc_traits::propagate_on_container_move_assignment{});
+            }
+            return *this;
+        }
+
+
+        // *************************************************************************************
         // modifiers
         constexpr void clear() noexcept {
             if (size_ == 0) return;
@@ -1120,6 +1145,35 @@ namespace mystl {
             p->right = clone_moving_subtree(src->right, p);
 
             return guard.release();
+        }
+
+        // move_assign
+        constexpr void move_assign(rb_tree&& other, true_type) {
+            clear();
+            node_alloc_ = mystl::move(other.node_alloc_);
+            swap_tree(other);
+        }
+
+        constexpr void move_assign(rb_tree&& other, false_type) {
+            if (node_alloc_ == other.node_alloc_) {
+                clear();
+                swap_tree(other);
+            }else {
+                try {
+                    Guard_subtree guard(*this, clone_moving_subtree(other.header_.parent, &header_));
+                    auto* left = minimum(guard.root);
+                    auto* right = maximum(guard.root);
+
+                    header_.parent = guard.release();
+                    header_.left = left;
+                    header_.right = right;
+                    size_ = other.size_;
+                }catch(...) {
+                    other.clear();
+                    throw;
+                }
+                other.clear();
+            }
         }
 
         // erase one node in rb_tree
