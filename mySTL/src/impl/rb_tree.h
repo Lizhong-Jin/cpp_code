@@ -345,6 +345,9 @@ namespace mystl {
         // construct
         constexpr rb_tree() : rb_tree(Compare{}, allocator_type{}, KeyOfValue{}) {}
 
+        explicit constexpr rb_tree(const Compare& comp, const allocator_type& alloc = allocator_type{})
+            : rb_tree(comp, alloc, KeyOfValue{}) {}
+
         explicit constexpr rb_tree(const allocator_type& alloc)
             : rb_tree(Compare{}, alloc, KeyOfValue{}) {}
 

@@ -46,15 +46,47 @@ namespace mystl {
 
     protected:
         Base tree_;
-        
 
     public:
         // *************************************************************************************
         // constructor
+        constexpr set() : set(Compare()) {}
+
+        explicit constexpr set(const Compare& comp, const Allocator& alloc = Allocator())
+            : tree_(comp, alloc) {}
+
+        explicit constexpr set(const Allocator& alloc) : set(Compare(), alloc) {}
+
+        template <typename Input_Iterator>
+        constexpr set(Input_Iterator first, Input_Iterator last, const Compare& comp = Compare(),
+                    const Allocator& alloc = Allocator())
+            : tree_(first, last, comp, alloc) {}
+
+        template <typename Input_Iterator>
+        constexpr set(Input_Iterator first, Input_Iterator last, const Allocator& alloc = Allocator())
+            : tree_(first, last, alloc) {}
+
+        constexpr set(const set& other) : tree_(other.tree_) {}
+
+        constexpr set(const set& other, const Allocator& alloc) : tree_(other.tree_, alloc) {}
+
+        constexpr set(set&& other) : tree_(mystl::move(other.tree_)) {}
+
+        constexpr set(set&& other, const Allocator& alloc) : tree_(mystl::move(other.tree_), alloc) {}
+
+        constexpr set(mystl::initializer_list<value_type> list, const Compare& comp = Compare(),
+                    const Allocator& alloc = Allocator())
+            : tree_(list, comp, alloc) {}
+
+        constexpr set(mystl::initializer_list<value_type> list, const Allocator& alloc = Allocator())
+            : tree_(list, alloc) {}
 
 
         // *************************************************************************************
         // destructor
+        constexpr ~set() noexcept {
+            ~tree_();
+        }
 
 
     }; // class set
