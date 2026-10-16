@@ -16,7 +16,7 @@
 #include <utility>
 #include <vector>
 
-
+// 支持移动语义、类型擦除和小对象优化的通用任务包装器
 class MoveOnlyTask {
 public:
     MoveOnlyTask() noexcept = default;
@@ -68,7 +68,7 @@ public:
 
 private:
     static constexpr std::size_t inline_bytes = 32;
-    template <class T>
+    template <typename T>
     static constexpr bool fits_inline = sizeof(T) <= inline_bytes &&
         alignof(T) <= alignof(std::max_align_t) && std::is_nothrow_move_constructible_v<T>;
 
@@ -78,7 +78,7 @@ private:
         void* (*relocate)(void*, void*) noexcept; // nullptr 表示转移堆指针即可。
     };
 
-    template <class T>
+    template <typename T>
     static const Operations* operations_for() noexcept {
         if constexpr (fits_inline<T>) {
             static const Operations operations{
@@ -176,6 +176,11 @@ private:
     std::size_t size_ = 0;
 };
 
+enum class SubmitStatus {
+    Accepted,
+    QueueFull,
+    Closed
+};
 
 // 一个简单的 C++20 固定大小线程池。
 //
@@ -226,15 +231,21 @@ public:
     ThreadPool(ThreadPool&&) = delete;
     ThreadPool& operator=(ThreadPool&&) = delete;
 
-    // 提交任意可调用对象及其参数。
-    // 队列已满时立即抛出 std::runtime_error，不会阻塞或静默丢弃任务。
-    template <class Function, class... Args>
-    auto submit(Function&& function, Args&&... args)
-        -> std::future<std::invoke_result_t<std::decay_t<Function>,
-                                            std::decay_t<Args>...>> {
+private:
+    template <typename T>
+    struct PreparedTask {
+        MoveOnlyTask task;
+        std::future<T> future;
+    };
+
+public:
+    template <typename Function, typename... Args>
+    auto prepare(Function&& function, Args&&... args)
+        -> PreparedTask<std::invoke_result_t<std::decay_t<Function>,
+                                            std::decay_t<Args>...>>
+    {
         using ReturnType =
-            std::invoke_result_t<std::decay_t<Function>,
-                                 std::decay_t<Args>...>;
+            std::invoke_result_t<std::decay_t<Function>, std::decay_t<Args>...>;
 
         std::packaged_task<ReturnType()> task(
             [function = std::decay_t<Function>(
@@ -249,26 +260,60 @@ public:
                     },
                     std::move(arguments));
             });
+        
+        auto future = task.get_future();
+        MoveOnlyTask wrapped{[task = std::move(task)]() mutable {task();}};
+        return PreparedTask<ReturnType>{std::move(wrapped), std::move(future)};
+    }
 
-        auto result = task.get_future();
-        // 在锁外完成任务包装；future 的共享状态仍由 packaged_task 管理。
-        MoveOnlyTask submit_task{[task = std::move(task)]() mutable { task(); }};
-
+    // 尝试提交任意可调用对象及其参数。
+    template <typename R>
+    [[nodiscard]] SubmitStatus Trysubmit(PreparedTask<R>& prepared) {
+        if (!prepared.task)
+            throw std::invalid_argument("empty prepared task");
         {
             std::lock_guard<std::mutex> lock(mutex_);
-
             if (stopping_) {
-                throw std::runtime_error(
-                    "cannot submit a task to a stopped ThreadPool");
+                return SubmitStatus::Closed;
             }
-            if (!tasks_.try_push(std::move(submit_task))) {
-                throw std::runtime_error("ThreadPool task queue is full");
+            if (!task.try_push(std::move(prepared.task))) {
+                return SubmitStatus::QueueFull;
             }
         }
-
         task_available_.notify_one();
-        return result;
+        return SubmitStatus::Accepted;
     }
+
+
+    // 提交任意可调用对象及其参数, 失败时抛出异常
+    template <typename R>
+    void submit(PreparedTask<R>& prepared) {
+        const auto status = trySubmit(prepared);
+
+        if (status == SubmitStatus::QueueFull)
+            throw std::runtime_error("ThreadPool task queue is full");
+
+        if (status == SubmitStatus::Closed)
+            throw std::runtime_error("cannot submit a task to a stopped ThreadPool");
+    }
+
+    // 提交任意可调用对象及其参数, 失败时抛出异常，并可能丢失原对象
+    // 返回 future
+    template<typename Function, typename... Args>
+    auto submit(Function&& function, Args&&... args)
+        -> std::future<std::invoke_result_t<
+            std::decay_t<Function>, std::decay_t<Args>...>>
+    {
+        auto prepared = prepare(
+            std::forward<Function>(function),
+            std::forward<Args>(args)...);
+
+        submit(prepared);
+        return std::move(prepared.future);
+    }
+
+    
+
 
     // graceful shutdown：拒绝新任务，完成已入队任务并等待 worker 退出。
     // 可重复调用。
