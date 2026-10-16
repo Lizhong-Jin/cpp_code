@@ -16,8 +16,7 @@
 #include <utility>
 #include <vector>
 
-// C++20 的只移动 void() 包装。小对象直接存储，其他对象在堆上存储。
-// 内联对象必须能无异常移动；因此包装本身的移动操作始终 noexcept。
+
 class MoveOnlyTask {
 public:
     MoveOnlyTask() noexcept = default;
@@ -86,7 +85,6 @@ private:
                 [](void* object) { static_cast<void>(std::invoke(*static_cast<T*>(object))); },
                 [](void* object) noexcept { static_cast<T*>(object)->~T(); },
                 [](void* source, void* destination) noexcept -> void* {
-                    // 必须调用移动构造和析构，不能 memcpy 非平凡对象。
                     auto* moved = ::new (destination) T(std::move(*static_cast<T*>(source)));
                     static_cast<T*>(source)->~T();
                     return moved;
@@ -117,7 +115,7 @@ private:
     const Operations* operations_ = nullptr;
 };
 
-// 本身不负责同步，调用者必须持有线程池的 mutex。
+// 环形缓冲区
 class TaskRingBuffer {
 public:
     explicit TaskRingBuffer(std::size_t capacity)
@@ -145,26 +143,21 @@ public:
         return size_;
     }
 
-    // 满时返回 false，不消耗传入的任务。
     bool try_push(MoveOnlyTask&& task) noexcept {
         if (full()) {
             return false;
         }
-
         slots_[tail_] = std::move(task);
         advance(tail_);
         ++size_;
         return true;
     }
 
-    // 空时返回 false，不改变输出参数。
     bool try_pop(MoveOnlyTask& task) noexcept {
         if (empty()) {
             return false;
         }
-
         task = std::move(slots_[head_]);
-        // MoveOnlyTask 保证移动后的源槽位为空。
         advance(head_);
         --size_;
         return true;
@@ -186,9 +179,9 @@ private:
 
 // 一个简单的 C++20 固定大小线程池。
 //
-// - 任务由 MoveOnlyTask 管理，直接持有 packaged_task，无需 shared_ptr 包装。
-// - submit() 返回 std::future，任务返回值和异常都可以被调用者获取。
-// - 析构时停止接收新任务，完成队列中已有任务，然后等待所有线程退出。
+// 任务由 MoveOnlyTask 管理，直接持有 packaged_task。
+// submit() 返回 std::future，任务返回值和异常都可以被调用者获取。
+// 析构时停止接收新任务，完成队列中已有任务，然后等待所有线程退出。
 class ThreadPool {
 public:
     explicit ThreadPool(std::size_t num_workers,
