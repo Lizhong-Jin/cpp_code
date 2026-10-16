@@ -266,6 +266,23 @@ public:
         return PreparedTask<ReturnType>{std::move(wrapped), std::move(future)};
     }
 
+    template <typename Function, typename... Args>
+    MoveOnlyTask preparePost(Function&& function, Args&&... args) {
+        return MoveOnlyTask {
+            [function = std::decay_t<Function>(std::forward<Function>(function)),
+             arguments = std::make_tuple(std::forward<Args>(args)...)]()
+                mutable {
+                std::apply(
+                    [&function](auto&&... unpacked) {
+                        static_cast<void>(std::invoke(
+                            std::move(function),
+                            std::forward<decltype(unpacked)>(unpacked)...));
+                    },
+                    std::move(arguments));
+            }
+        };
+    }
+
     // 尝试提交任意可调用对象及其参数。
     template <typename R>
     [[nodiscard]] SubmitStatus Trysubmit(PreparedTask<R>& prepared) {
@@ -276,14 +293,13 @@ public:
             if (stopping_) {
                 return SubmitStatus::Closed;
             }
-            if (!task.try_push(std::move(prepared.task))) {
+            if (!tasks_.try_push(std::move(prepared.task))) {
                 return SubmitStatus::QueueFull;
             }
         }
         task_available_.notify_one();
         return SubmitStatus::Accepted;
     }
-
 
     // 提交任意可调用对象及其参数, 失败时抛出异常
     template <typename R>
@@ -310,6 +326,44 @@ public:
 
         submit(prepared);
         return std::move(prepared.future);
+    }
+
+    // 尝试提交无返回值的可调用对象及其参数。
+    SubmitStatus Trypost(MoveOnlyTask& task) {
+        if (!task)
+            throw std::invalid_argument("empty prepared task");
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            if (stopping_) {
+                return SubmitStatus::Closed;
+            }
+            if (!tasks_.try_push(std::move(task))) {
+                return SubmitStatus::QueueFull;
+            }
+        }
+        task_available_.notify_one();
+        return SubmitStatus::Accepted;
+    }
+
+    // 提交无返回值的可调用对象及其参数，失败时抛出异常
+    void post(MoveOnlyTask& task) {
+        const auto status = Trypost(task);
+
+        if (status == SubmitStatus::QueueFull)
+            throw std::runtime_error("ThreadPool task queue is full");
+
+        if (status == SubmitStatus::Closed)
+            throw std::runtime_error("cannot submit a task to a stopped ThreadPool");
+    }
+
+    // 提交无返回值的可调用对象及其参数, 失败时抛出异常，并可能丢失原对象
+    template<typename Function, typename... Args>
+    void post(Function&& function, Args&&... args){
+        auto prepared = preparePost(
+            std::forward<Function>(function),
+            std::forward<Args>(args)...);
+
+        post(prepared);
     }
 
     
